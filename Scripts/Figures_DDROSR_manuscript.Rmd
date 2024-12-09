@@ -1,0 +1,1658 @@
+---
+title: "Figures DDR-OSR"
+author: "E.J. Burgers"
+last modified: "2024-07-11"
+output: html_document
+---
+
+This script can be used to simulate all different model versions described in the publication. It can also be used to replicate the images in the publication.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Some settings
+
+Loading the required packages, functions etc. It is also possible to indicate here if you want to save the images that are being generated.
+
+```{r}
+rm(list = ls())
+library(tidyverse)
+library(deSolve)
+
+source("functions.R")
+source("models.R")
+
+SaveFigures = 0 #if 1 figures will be saved, if 0 figures will not be saved
+
+tspan <-  seq(0, 62, by = 1)
+
+```
+
+# Experimental data
+
+First we load the experimental data.
+
+```{r}
+# GFP data
+measurements_DEM = read.csv(file = "..//Data//GFPdata_DEM_2023-02-15.csv", header=TRUE) %>%
+  mutate(replID = ifelse(StateVar == "p53" & replID == 4, 1, replID))
+measurements_ETO = read.csv(file = "..//Data//GFPdata_ETO_2023-02-15.csv", header=TRUE) %>%
+  mutate(replID = ifelse(StateVar == "p53" & replID == 4, 1, replID))
+
+# Viability data
+viability_DEM = read.csv(file = "..//Data//ViabilityData_DEM_2023-11-06.csv", header=TRUE)
+viability_ETO = read.csv(file = "..//Data//ViabilityData_ETO_2023-11-06.csv", header=TRUE)
+
+doses_DEM = unique(measurements_DEM$dose_uM)
+doses_ETO = unique(measurements_ETO$dose_uM)
+
+dose_names = as_labeller(c(
+  `2`   = "2~mu*M",
+  `10`  = "10~mu*M",
+  `20`  = "20~mu*M",
+  `40`  = "40~mu*M",  
+  `80`  = "80~mu*M", 
+  `120` = "120~mu*M",
+  `160` = "160~mu*M",
+  `200` = "200~mu*M",
+  `0.5` = "0.5~mu*M",
+  `1`   = "1~mu*M",
+  `2.5` = "2.5~mu*M",
+  `5`   = "5~mu*M",  
+  `10`  = "10~mu*M",
+  `25`  = "25~mu*M"),
+   label_parsed)
+```
+
+## Compute mean
+
+Here we compute the mean of the experimental data.
+
+```{r}
+mean_DEM = measurements_DEM %>%
+  group_by(StateVar, treatment, dose_uM, timepoints)%>%
+  summarise(mean_interpol = mean(data4modelInterpol, na.rm=TRUE), 
+            sd_interpol = sd(data4modelInterpol,na.rm=TRUE)) %>%
+  ungroup()
+
+mean_ETO = measurements_ETO %>%
+  group_by(StateVar, treatment, dose_uM, timepoints)%>%
+  summarise(mean_interpol = mean(data4modelInterpol, na.rm=TRUE), 
+            sd_interpol = sd(data4modelInterpol,na.rm=TRUE)) %>%
+  ungroup()
+
+```
+# ETO Base
+### Figure S1: Viability ETO
+
+These figures show the viability data of etoposide.
+
+```{r}
+FigureS1a = ggplot(data = viability_ETO) + theme_bw() +
+  geom_ribbon(aes(x = mean_time, ymin = mean_count_norm-sd_count_norm, 
+                  ymax = mean_count_norm+sd_count_norm, 
+                  fill = as.factor(dose_uM)), alpha = 0.2) +
+  geom_line(aes(x = mean_time, y = mean_count_norm, color = as.factor(dose_uM)), 
+            linewidth=1) + 
+  xlab("Time (hours)") + ylab("Normalised cell count") +
+  labs(color = expression(paste("Dose (", mu, "M)")), 
+       fill = expression(paste("Dose (", mu, "M)")))
+
+FigureS1b = ggplot(data = viability_ETO) + theme_bw() +
+  geom_ribbon(aes(x = mean_time, ymin = mean_AnV-sd_AnV, ymax = mean_AnV+sd_AnV, 
+                  fill = as.factor(dose_uM)), alpha = 0.2) +
+  geom_line(aes(x = mean_time, y = mean_AnV, color = as.factor(dose_uM)), 
+            linewidth=1) + 
+  xlab("Time (hours)") + ylab("Fraction AnV positive cells") +
+  labs(color = expression(paste("Dose (", mu, "M)")), 
+       fill = expression(paste("Dose (", mu, "M)")))
+
+FigureS1c = ggplot(data = viability_ETO) + theme_bw() +
+  geom_ribbon(aes(x = mean_time, ymin = mean_PI-sd_PI, ymax = mean_PI+sd_PI, 
+                  fill = as.factor(dose_uM)), alpha = 0.2) +
+  geom_line(aes(x = mean_time, y = mean_PI, color = as.factor(dose_uM)), 
+            linewidth=1) + 
+  xlab("Time (hours)") + ylab("Fraction PI positive cells") +
+  labs(color = expression(paste("Dose (", mu, "M)")), 
+       fill = expression(paste("Dose (", mu, "M)")))
+
+print(FigureS1a)
+print(FigureS1b)
+print(FigureS1c)
+
+if(SaveFigures == 1){
+  ggsave("FigureS1a.svg", plot = FigureS1a, path = "..//Figures", width = 13,
+         height = 10, units = "cm", dpi = 300)
+  ggsave("FigureS1b.svg", plot = FigureS1b, path = "..//Figures", width = 13,
+           height = 10, units = "cm", dpi = 300)
+  ggsave("FigureS1c.svg", plot = FigureS1c, path = "..//Figures", width = 13,
+         height = 10, units = "cm", dpi = 300)
+}
+
+```
+## Simulation for base model DDR
+
+The simulation of the base DDR model for exposure to etoposide.
+
+```{r}
+file = list.files("..//FittingResults", pattern='DDRbase')
+simu_pars_DDRbase = read.csv(file = paste("..//FittingResults//", file, sep=""), 
+                             header = TRUE) %>%
+    add_row(X = "n", est_value = 4)
+
+
+inistate_DDR = c(
+  DD = simu_pars_DDRbase$est_value[simu_pars_DDRbase$X=="DD_ss"],
+  P53 = simu_pars_DDRbase$est_value[simu_pars_DDRbase$X=="P53_ss"],
+  P53P = simu_pars_DDRbase$est_value[simu_pars_DDRbase$X=="P53P_ss"],
+  MDM2 = 0.9496844,
+  p21 = 0.659682552,
+  BTG2 = 0.455598913
+)
+
+ECs_ETO = c(simu_pars_DDRbase$est_value[simu_pars_DDRbase$X=="EC1"],
+        simu_pars_DDRbase$est_value[simu_pars_DDRbase$X=="EC2"],
+        simu_pars_DDRbase$est_value[simu_pars_DDRbase$X=="EC3"], 
+        simu_pars_DDRbase$est_value[simu_pars_DDRbase$X=="EC4"], 
+        simu_pars_DDRbase$est_value[simu_pars_DDRbase$X=="EC5"], 
+        simu_pars_DDRbase$est_value[simu_pars_DDRbase$X=="EC6"])
+
+modeldata_DDRbase = run_model(baseDDR, tspan, doses_ETO, ECs_ETO, inistate_DDR, 
+                              simu_pars_DDRbase$X, simu_pars_DDRbase$est_value)
+modeldata_DDRbase = include_p53(modeldata_DDRbase)
+
+```
+## Figure 1b: base model DDR - 2.5 & 25 uM ETO
+
+Plotting of the base DDR model for exposure to 2.5 & 25 uM etoposide.
+
+```{r}
+SVs = c("BTG2", "MDM2", "p21", "p53")
+doses = c(2.5, 25)
+
+Figure1b = ggplot() + theme_bw() +
+  geom_point(data = filter(measurements_ETO, StateVar %in% SVs & 
+                             dose_uM %in% doses), 
+             aes(x = timeAfterExposure, y = data4modelReal, 
+                 shape = as.factor(replID)), color = "dark grey") + 
+  geom_line(data = filter(mean_ETO, StateVar %in% SVs & dose_uM %in% doses), 
+            aes(x = timepoints, y = mean_interpol, col = "Mean"), linewidth = 1.5) +
+  geom_line(data = filter(modeldata_DDRbase, StateVar %in% SVs & 
+                            dose_uM %in% doses), 
+            aes(x = time, y = value, col = "Simulation"), linewidth = 1.5) +
+  facet_grid(cols = vars(dose_uM), rows = vars(StateVar), scales = "free", 
+             labeller = labeller(dose_uM = dose_names)) +
+  scale_color_manual(name = "", breaks = c("Mean", "Simulation"),
+                       values = c("Mean" = "black", "Simulation" = "firebrick")) + 
+  xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + theme(legend.position = "bottom") +
+  labs(shape = "Replicate")
+
+print(Figure1b)
+
+if(SaveFigures == 1){
+  ggsave("Figure1b.svg", plot = Figure1b, path = "..//Figures", width = 12,
+         height = 22, units = "cm", dpi = 300)
+}
+
+```
+
+### Figure S2: all doses DDR simulation
+
+Plotting of the base DDR model for exposure to all concentrations of etoposide.
+
+```{r}
+SVs = c("BTG2", "MDM2", "p21", "p53")
+
+FigureS2 = ggplot() + theme_bw() +
+  geom_point(data = filter(measurements_ETO, StateVar %in% SVs), 
+             aes(x = timeAfterExposure, y = data4modelReal, 
+                 shape = as.factor(replID)), color = "dark grey") + 
+  geom_line(data = filter(mean_ETO, StateVar %in% SVs), 
+            aes(x = timepoints, y = mean_interpol, colour = "Mean"), 
+            linewidth = 1.5) +
+  geom_line(data = filter(modeldata_DDRbase, StateVar %in% SVs), 
+            aes(x = time, y = value, colour = "Simulation"), linewidth = 1.5) +
+  facet_grid(cols = vars(dose_uM), rows = vars(StateVar), scales = "free", 
+             labeller = labeller(dose_uM = dose_names)) +
+  scale_color_manual(name = "", breaks = c("Mean", "Simulation"),
+                       values = c("Mean" = "black", "Simulation" = "firebrick")) +    
+  xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") +
+  labs(shape = "Replicate")
+
+print(FigureS2)
+
+if(SaveFigures == 1){
+  ggsave("FigureS2.pdf", plot = FigureS2, path = "..//Figures", width = 30,
+         height = 20, units = "cm", dpi = 300)
+}
+```
+
+### Figure S3a: plotting the dose parameter for the DDR model.
+
+Value for the initial value for the stress versus the dose.
+
+```{r}
+FigureS3a = ggplot() + theme_bw() +
+  geom_point(aes(x = doses_ETO, y = ECs_ETO)) +
+  xlab(expression("Dose ("*mu*"M)")) + ylab(expression("Initial value S"[DD]))
+print(FigureS3a)
+
+if(SaveFigures == 1){
+  ggsave("FigureS3a.svg", plot = FigureS3a, path = "..//Figures", width = 12,
+         height = 10, units = "cm", dpi = 300)
+}
+```
+
+## Figure 1c: effect ETO on NRF2 & SRXN1
+
+This figure shows for each concentration of etoposide the effect on NRF2 and SRXN1 over time.
+
+```{r}
+Figure1c = ggplot(data = filter(mean_ETO, StateVar == "NRF2" | StateVar == "SRXN1")) +
+  theme_bw() +
+  geom_ribbon(aes(x = timepoints, ymin = mean_interpol-sd_interpol, 
+                  ymax = mean_interpol+sd_interpol, fill = as.factor(dose_uM)), 
+              alpha = 0.2) +
+  geom_line(aes(x = timepoints, y = mean_interpol, color = as.factor(dose_uM)), 
+            linewidth=1) + expand_limits(x = 0, y = 0) +
+  facet_wrap(vars(StateVar), ncol = 1) + xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + 
+  labs(color = expression(paste("Dose (", mu, "M)")), 
+       fill = expression(paste("Dose (", mu, "M)")))
+  
+  print(Figure1c)
+  
+  if(SaveFigures == 1){
+  ggsave("Figure1c.svg", plot = Figure1c, path = "..//Figures", width = 10,
+         height = 12, units = "cm", dpi = 300)
+}
+```
+# DEM Base
+
+### Figure S4: Viability DEM
+
+These figures show the viability data of DEM.
+
+```{r}
+FigureS4a = ggplot(data = viability_DEM) + theme_bw() +
+  geom_ribbon(aes(x = mean_time, ymin = mean_count_norm-sd_count_norm, 
+                  ymax = mean_count_norm+sd_count_norm, 
+                  fill = as.factor(dose_uM)), alpha = 0.2) +
+  geom_line(aes(x = mean_time, y = mean_count_norm, color = as.factor(dose_uM)), 
+            linewidth=1) + 
+  xlab("Time (hours)") + ylab("Normalised cell count") +
+  labs(color = expression(paste("Dose (", mu, "M)")), 
+       fill = expression(paste("Dose (", mu, "M)")))
+
+FigureS4b = ggplot(data = viability_DEM) + theme_bw() +
+  geom_ribbon(aes(x = mean_time, ymin = mean_AnV-sd_AnV, ymax = mean_AnV+sd_AnV, 
+                  fill = as.factor(dose_uM)), alpha = 0.2) +
+  geom_line(aes(x = mean_time, y = mean_AnV, color = as.factor(dose_uM)), 
+            linewidth=1) + 
+  xlab("Time (hours)") + ylab("Fraction AnV positive cells") +
+  labs(color = expression(paste("Dose (", mu, "M)")), 
+       fill = expression(paste("Dose (", mu, "M)")))
+
+FigureS4c = ggplot(data = viability_DEM) + theme_bw() +
+  geom_ribbon(aes(x = mean_time, ymin = mean_PI-sd_PI, ymax = mean_PI+sd_PI, 
+                  fill = as.factor(dose_uM)), alpha = 0.2) +
+  geom_line(aes(x = mean_time, y = mean_PI, color = as.factor(dose_uM)), 
+            linewidth=1) + 
+  xlab("Time (hours)") + ylab("Fraction PI positive cells") +
+  labs(color = expression(paste("Dose (", mu, "M)")), 
+       fill = expression(paste("Dose (", mu, "M)")))
+
+print(FigureS4a)
+print(FigureS4b)
+print(FigureS4c)
+
+if(SaveFigures == 1){
+  ggsave("FigureS4a.svg", plot = FigureS4a, path = "..//Figures", width = 13,
+         height = 10, units = "cm", dpi = 300)
+  ggsave("FigureS4b.svg", plot = FigureS4b, path = "..//Figures", width = 13,
+         height = 10, units = "cm", dpi = 300)
+  ggsave("FigureS4c.svg", plot = FigureS4c, path = "..//Figures", width = 13,
+         height = 10, units = "cm", dpi = 300)
+}
+```
+
+## Simulation for base model OSR
+
+The simulation of the base OSR model for exposure to DEM.
+
+```{r}
+##### model with NRF2-dependent KEAP1 production
+file = list.files("..//FittingResults", pattern='OSRbase')
+simu_pars_OSRbase = read.csv(file  = paste("..//FittingResults//", file, sep = ""), 
+                             header = TRUE)
+
+inistate_OSR = c(
+  KEAP1 = simu_pars_OSRbase$est_value[simu_pars_OSRbase$X=="KEAP1_ss"],
+  modifiedK1 = 0,
+  NRF2 =  0.77378141,
+  SRXN1 = 0.433384695
+)
+
+ECs_DEM = c(simu_pars_OSRbase$est_value[simu_pars_OSRbase$X=="EC1"],
+        simu_pars_OSRbase$est_value[simu_pars_OSRbase$X=="EC2"],
+        simu_pars_OSRbase$est_value[simu_pars_OSRbase$X=="EC3"], 
+        simu_pars_OSRbase$est_value[simu_pars_OSRbase$X=="EC4"], 
+        simu_pars_OSRbase$est_value[simu_pars_OSRbase$X=="EC5"], 
+        simu_pars_OSRbase$est_value[simu_pars_OSRbase$X=="EC6"],
+        simu_pars_OSRbase$est_value[simu_pars_OSRbase$X=="EC7"], 
+        simu_pars_OSRbase$est_value[simu_pars_OSRbase$X=="EC8"])
+
+modeldata_OSRbase = run_model(baseOSR, tspan, doses_DEM, ECs_DEM, inistate_OSR, 
+                              simu_pars_OSRbase$X, simu_pars_OSRbase$est_value)
+modeldata_OSRbase = include_p53(modeldata_OSRbase)
+
+##### model without NRF2-dependent KEAP1 production
+file = list.files("..//FittingResults", pattern='OSRwithout')
+simu_pars_OSRwithout = read.csv(file  = paste("..//FittingResults//", file, sep = ""), 
+                             header = TRUE) %>%
+  add_row(X = "Vmax_K1", est_value = 0) %>%
+  add_row(X = "Km_K1", est_value = 1) %>%
+  add_row(X = "hillK1", est_value = 1)
+
+inistate_OSRwithout = c(
+  KEAP1 = simu_pars_OSRwithout$est_value[simu_pars_OSRwithout$X=="KEAP1_ss"],
+  modifiedK1 = 0,
+  NRF2 =  0.77378141,
+  SRXN1 = 0.433384695
+)
+
+ECs_OSRwithout = c(simu_pars_OSRwithout$est_value[simu_pars_OSRwithout$X=="EC1"],
+        simu_pars_OSRwithout$est_value[simu_pars_OSRwithout$X=="EC2"],
+        simu_pars_OSRwithout$est_value[simu_pars_OSRwithout$X=="EC3"], 
+        simu_pars_OSRwithout$est_value[simu_pars_OSRwithout$X=="EC4"], 
+        simu_pars_OSRwithout$est_value[simu_pars_OSRwithout$X=="EC5"], 
+        simu_pars_OSRwithout$est_value[simu_pars_OSRwithout$X=="EC6"],
+        simu_pars_OSRwithout$est_value[simu_pars_OSRwithout$X=="EC7"], 
+        simu_pars_OSRwithout$est_value[simu_pars_OSRwithout$X=="EC8"])
+  
+
+modeldata_OSRwithout = run_model(baseOSR, tspan, doses_DEM, ECs_OSRwithout,
+                                   inistate_OSRwithout, simu_pars_OSRwithout$X,
+                                   simu_pars_OSRwithout$est_value)
+modeldata_OSRwithout = include_p53(modeldata_OSRwithout)
+
+
+```
+## Cost, AIC & BIC for both OSR models
+```{r}
+AIC_with = compute_AIC(measurements_DEM, c("NRF2", "SRXN1"), 23, baseOSR, 
+                       doses_DEM, ECs_DEM, inistate_OSR, simu_pars_OSRbase$X,
+                       simu_pars_OSRbase$est_value)
+AIC_without = compute_AIC(measurements_DEM, c("NRF2", "SRXN1"), 20, baseOSR,
+                          doses_DEM, ECs_OSRwithout, inistate_OSRwithout,
+                          simu_pars_OSRwithout$X, simu_pars_OSRwithout$est_value)
+```
+
+
+## Figure 2b: base model OSR - 20 & 200 uM DEM
+
+Plotting of the base OSR model for exposure to 20 & 200 uM DEM.
+
+```{r}
+SVs = c("NRF2", "SRXN1")
+doses = c(20,200)
+
+Figure2b = ggplot() + theme_bw() +
+  geom_point(data = filter(measurements_DEM, StateVar %in% SVs & dose_uM %in% doses), 
+             aes(x = timeAfterExposure, y = data4modelReal, shape = as.factor(replID)), 
+             color = "dark grey") + 
+  geom_line(data = filter(mean_DEM, StateVar %in% SVs & dose_uM %in% doses), 
+            aes(x = timepoints, y = mean_interpol, col = "Mean"), linewidth = 1.5) +
+  geom_line(data = filter(modeldata_OSRwithout, StateVar %in% SVs & dose_uM %in% doses), 
+            aes(x = time, y = value, col = "Model without NRF2-dependent KEAP1 production"), linewidth = 1.5) +
+  geom_line(data = filter(modeldata_OSRbase, StateVar %in% SVs & dose_uM %in% doses), 
+            aes(x = time, y = value, col = "Model with NRF2-dependent KEAP1 production"), linewidth = 1.5) +
+    facet_grid(cols = vars(dose_uM), rows = vars(StateVar), scales = "free", 
+             labeller = labeller(dose_uM = dose_names)) +
+  scale_color_manual(name = "", breaks = c("Mean", 
+                                           "Model with NRF2-dependent KEAP1 production", 
+                                           "Model without NRF2-dependent KEAP1 production"),
+                     values = c("Model with NRF2-dependent KEAP1 production" = "firebrick", 
+                                "Mean" = "black", 
+                                "Model without NRF2-dependent KEAP1 production" = "royalblue")) +
+  xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + theme(legend.position = "bottom") +
+  labs(shape = "Replicate") + 
+  guides(color=guide_legend(nrow=3,byrow=TRUE), shape=guide_legend(nrow=3,byrow=TRUE))
+
+print(Figure2b)
+
+if(SaveFigures == 1){
+  ggsave("Figure2b.svg", plot = Figure2b, path = "..//Figures", width = 13,
+         height = 13, units = "cm", dpi = 300)
+}
+
+```
+
+### Figure S5: all doses OSR model simulation
+
+Plotting of the base OSR model for exposure to all concentrations DEM.
+
+```{r}
+SVs = c("NRF2", "SRXN1")
+doses = unique(measurements_DEM$dose_uM)
+
+FigureS5 = ggplot() + theme_bw() +
+  geom_point(data = filter(measurements_DEM, StateVar %in% SVs & dose_uM %in% doses), 
+             aes(x = timeAfterExposure, y = data4modelReal, shape = as.factor(replID)), 
+             color = "dark grey") + 
+  geom_line(data = filter(mean_DEM, StateVar %in% SVs & dose_uM %in% doses), 
+            aes(x = timepoints, y = mean_interpol, col = "Mean"), linewidth = 1.5) +
+  geom_line(data = filter(modeldata_OSRwithout, StateVar %in% SVs & dose_uM %in% doses), 
+            aes(x = time, y = value, col = "Model without NRF2-dependent KEAP1 production"), linewidth = 1.5) +
+  geom_line(data = filter(modeldata_OSRbase, StateVar %in% SVs & dose_uM %in% doses), 
+            aes(x = time, y = value, col = "Model with NRF2-dependent KEAP1 production"), linewidth = 1.5) +
+  facet_grid(cols = vars(dose_uM), rows = vars(StateVar), scales = "free",
+             labeller = labeller(dose_uM = dose_names)) +
+scale_color_manual(name = "", breaks = c("Model with NRF2-dependent KEAP1 production", "Mean", 
+                                         "Model without NRF2-dependent KEAP1 production"),
+                   values = c("Model with NRF2-dependent KEAP1 production" = "firebrick", 
+                              "Mean" = "black",
+                              "Model without NRF2-dependent KEAP1 production" = "royalblue")) +
+  xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + theme(legend.position = "bottom") +
+  labs(shape = "Replicate") + guides(color=guide_legend(nrow=2,byrow=TRUE))
+
+print(FigureS5)
+
+if(SaveFigures == 1){
+  ggsave("FigureS5.pdf", plot = FigureS5, path = "..//Figures", width = 30,
+         height = 12, units = "cm", dpi = 300)
+}
+```
+
+### Figure S3b: plotting the dose parameter for the OSR model.
+
+Value for the initial value for the stress versus the dose.
+
+```{r}
+FigureS3b = ggplot() + theme_bw() +
+  geom_point(aes(x = doses_DEM, y = ECs_DEM )) +
+  xlab(expression("Dose ("*mu*"M)")) + ylab(expression("Initial value S" [OX]))
+print(FigureS3b)
+
+if(SaveFigures == 1){
+  ggsave("FigureS3b.svg", plot = FigureS3b, path = "..//Figures", width = 12,
+          height = 10, units = "cm", dpi = 300)
+}
+```
+
+## Figure 2c: effect DEM on P53 & MDM2
+
+This figure shows for each concentration of DEM the effect on MDM2 and P53 over time.
+
+```{r}
+Figure2c = ggplot(data = filter(mean_DEM, StateVar == "p53" | StateVar == "MDM2")) +
+  theme_bw() +
+  geom_ribbon(aes(x = timepoints, ymin = mean_interpol-sd_interpol, 
+                  ymax = mean_interpol+sd_interpol, fill = as.factor(dose_uM)), 
+              alpha = 0.2) +
+  geom_line(aes(x = timepoints, y = mean_interpol, color = as.factor(dose_uM)), 
+            linewidth=1) + expand_limits(x = 0, y = 0) +
+  facet_wrap(vars(StateVar)) + xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + 
+  labs(color = expression(paste("Dose (", mu, "M)")), 
+       fill = expression(paste("Dose (", mu, "M)")))
+  
+  print(Figure2c)
+
+  if(SaveFigures == 1){
+  ggsave("Figure2c.svg", plot = Figure2c, path = "..//Figures", width = 20,
+         height = 9, units = "cm", dpi = 300)
+  }
+  
+```
+### Figure S6: individual p53 replicates at early timepoints
+
+This figure shows for each concentration of DEM the effect on the individual p53 replicates at early time points.
+
+```{r}
+FigureS6 = ggplot() + theme_bw() +
+  geom_point(data = filter(measurements_DEM, StateVar == "p53" & timeAfterExposure<20),
+             aes(x = timeAfterExposure, y = data4modelReal, colour = as.factor(replID))) +
+  geom_line(data = filter(measurements_DEM, StateVar == "p53" & timeAfterExposure<20),
+             aes(x = timeAfterExposure, y = data4modelReal, colour = as.factor(replID))) + 
+  facet_wrap(vars(dose_uM), nrow = 2, scales = "free", labeller = labeller(dose_uM = dose_names)) +
+  xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + 
+  labs(colour = "Replicate")
+
+print(FigureS6)
+
+if(SaveFigures == 1){
+  ggsave("FigureS6.pdf", plot = FigureS6, path = "..//Figures", width = 20,
+         height = 10, units = "cm", dpi = 300)
+}
+```
+
+### Figure S7: effect DEM on BTG2 & p21
+
+This figure shows for each concentration of DEM the effect on BTG2 and p21 over time.
+
+```{r}
+FigureS7 = ggplot(data = filter(mean_DEM, StateVar == "p21" | StateVar == "BTG2")) +
+  theme_bw() +
+  geom_ribbon(aes(x = timepoints, ymin = mean_interpol-sd_interpol, 
+                  ymax = mean_interpol+sd_interpol, fill = as.factor(dose_uM)), 
+              alpha = 0.2) +
+  geom_line(aes(x = timepoints, y = mean_interpol, color = as.factor(dose_uM)), 
+            linewidth=1) + expand_limits(x = 0, y = 0) +
+  facet_wrap(vars(StateVar)) + xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + 
+  labs(color = expression(paste("Dose (", mu, "M)")), 
+       fill = expression(paste("Dose (", mu, "M)")))
+  
+  print(FigureS7)
+  
+    if(SaveFigures == 1){
+  ggsave("FigureS7.pdf", plot = FigureS7, path = "..//Figures", width = 20,
+         height = 10, units = "cm", dpi = 300)
+  }
+```
+
+# Crosstalk model ETO
+
+Simulation of different crosstalk models for exposure to etoposide.
+
+```{r}
+inistate_combi = c(inistate_DDR, inistate_OSR)
+
+#Model E0
+simu_pars_E0 = simu_pars_DDRbase %>%
+  rename(value1 = est_value) %>%
+  select(-init_value) %>%
+  full_join(simu_pars_OSRbase) %>%
+  rename(value2 = est_value) %>%
+  mutate(est_value = ifelse(is.na(value1), value2, value1)) %>%
+  select(-init_value) %>%
+  select(c(X,est_value))
+modeldata_E0 = include_p53(run_model(Model_E0, tspan, doses_ETO, ECs_ETO, 
+                                     inistate_combi,simu_pars_E0$X, 
+                                     simu_pars_E0$est_value))
+
+#Model E1
+file = list.files("..//FittingResults", pattern='ModelE1')
+simu_pars_E1 = read.csv(file  = paste("..//FittingResults//", file, sep = ""), 
+                             header = TRUE) %>%
+  rename(value1 = est_value) %>%
+  select(-init_value) %>%
+  full_join(simu_pars_E0) %>%
+  rename(value2 = est_value) %>%
+  mutate(est_value = ifelse(is.na(value1), value2, value1)) %>%
+  select(c(X,est_value))
+modeldata_E1 = include_p53(run_model(Model_E1, tspan, doses_ETO, ECs_ETO, 
+                                     inistate_combi,simu_pars_E1$X,
+                                     simu_pars_E1$est_value))
+
+#Model E2
+file = list.files("..//FittingResults", pattern='ModelE2')
+simu_pars_E2 = read.csv(file  = paste("..//FittingResults//", file, sep = ""), 
+                             header = TRUE) %>%
+  rename(value1 = est_value) %>%
+  select(-init_value) %>%
+  full_join(simu_pars_E0) %>%
+  rename(value2 = est_value) %>%
+  mutate(est_value = ifelse(is.na(value1), value2, value1)) %>%
+  select(c(X,est_value))
+modeldata_E2 = include_p53(run_model(Model_E2, tspan, doses_ETO, ECs_ETO, 
+                                     inistate_combi,simu_pars_E2$X,
+                                     simu_pars_E2$est_value))
+
+#Model E3
+file = list.files("..//FittingResults", pattern='ModelE3')
+simu_pars_E3 = read.csv(file  = paste("..//FittingResults//", file, sep = ""), 
+                             header = TRUE) %>%
+  rename(value1 = est_value) %>%
+  select(-init_value) %>%
+  full_join(simu_pars_E0) %>%
+  rename(value2 = est_value) %>%
+  mutate(est_value = ifelse(is.na(value1), value2, value1)) %>%
+  select(c(X,est_value))
+modeldata_E3 = include_p53(run_model(Model_E3, tspan, doses_ETO, ECs_ETO, 
+                                     inistate_combi, simu_pars_E3$X,
+                                     simu_pars_E3$est_value))
+
+```
+
+## Table 1: cost, AIC, BICfor models M-E1 to M-E3
+
+Computation of cost, AIC and BIC for each model version.
+
+```{r}
+AIC_E0 = compute_AIC(measurements_ETO, c("NRF2", "SRXN1"), 0, Model_E0, doses_ETO,
+                     ECs_ETO, inistate_combi,simu_pars_E0$X, simu_pars_E0$est_value)
+AIC_E1 = compute_AIC(measurements_ETO, c("NRF2", "SRXN1"), 1, Model_E1, doses_ETO,
+                     ECs_ETO, inistate_combi,simu_pars_E1$X, simu_pars_E1$est_value)
+AIC_E2 = compute_AIC(measurements_ETO, c("NRF2", "SRXN1"), 1, Model_E2, doses_ETO,
+                     ECs_ETO, inistate_combi,simu_pars_E2$X, simu_pars_E2$est_value)
+AIC_E3 = compute_AIC(measurements_ETO, c("NRF2", "SRXN1"), 2, Model_E3, doses_ETO,
+                     ECs_ETO,inistate_combi,simu_pars_E3$X, simu_pars_E3$est_value)
+```
+
+## Figure 3b: crosstalk models ETO - 2.5 & 25 uM
+
+Plotting of the crosstalk models for exposure to 2.5 & 25 uM etoposide.
+
+```{r}
+SVs = c("NRF2", "SRXN1")
+doses = c(2.5, 25)
+
+Figure3b = ggplot() + theme_bw() +
+  geom_point(data = filter(measurements_ETO, StateVar %in% SVs & dose_uM %in% doses), 
+           aes(x = timeAfterExposure, y = data4modelReal, shape = as.factor(replID)), 
+           color = "dark grey") +
+  geom_line(data = filter(mean_ETO, StateVar %in% SVs &dose_uM %in% doses), 
+            aes(x = timepoints, y = mean_interpol), col = "black", linewidth = 1.5) +
+  geom_line(data = filter(modeldata_E0, StateVar %in% SVs & dose_uM %in% doses), 
+            aes(x = time, y = value, col = "M-E0"), linewidth = 1.5) +
+  geom_line(data = filter(modeldata_E1, StateVar %in% SVs & dose_uM %in% doses), 
+            aes(x = time, y = value, col = "M-E1"), linewidth = 1.5) +
+  geom_line(data = filter(modeldata_E2, StateVar %in% SVs & dose_uM %in% doses), 
+              aes(x = time, y = value, col = "M-E2"), linewidth = 1.5) +
+  geom_line(data = filter(modeldata_E3, StateVar %in% SVs & dose_uM %in% doses), 
+              aes(x = time, y = value, col = "M-E3"), linewidth = 1.5) +
+  facet_grid(cols = vars(dose_uM), rows = vars(StateVar), scales = "free", 
+             labeller = labeller(dose_uM = dose_names)) +
+  scale_color_manual(name = "Model", breaks = c("M-E0", "M-E1", "M-E2", "M-E3"),
+                     values = c("M-E0" = "firebrick", "M-E1" = "royalblue", 
+                                "M-E2" = "goldenrod","M-E3" = "darkolivegreen")) +
+  xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + 
+  labs(shape = "Replicate")
+
+plot(Figure3b)
+
+if(SaveFigures == 1){
+  ggsave("Figure3b.svg", plot = Figure3b, path = "..//Figures", width = 15,
+         height = 10, units = "cm", dpi = 300)
+}
+```
+
+### Figure S8: crosstalk models ETO - all concentrations
+
+Plotting of the crosstalk models for exposure to all concentrations etoposide.
+
+```{r}
+SVs = c("NRF2", "SRXN1")
+doses = doses_ETO
+
+FigureS8 = ggplot() + theme_bw() +
+  geom_point(data = filter(measurements_ETO, StateVar %in% SVs & dose_uM %in% doses),
+             aes(x = timeAfterExposure, y = data4modelReal, shape = as.factor(replID)),
+           color = "dark grey") + 
+  geom_line(data = filter(mean_ETO, StateVar %in% SVs &dose_uM %in% doses), 
+            aes(x = timepoints, y = mean_interpol), col = "black", linewidth = 1.5) +
+  geom_line(data = filter(modeldata_E0, StateVar %in% SVs & dose_uM %in% doses), 
+            aes(x = time, y = value, col = "M-E0"), linewidth = 1.5) +
+  geom_line(data = filter(modeldata_E1, StateVar %in% SVs & dose_uM %in% doses),
+            aes(x = time, y = value, col = "M-E1"), linewidth = 1.5) +
+  geom_line(data = filter(modeldata_E2, StateVar %in% SVs & dose_uM %in% doses),
+              aes(x = time, y = value, col = "M-E2"), linewidth = 1.5) +
+  geom_line(data = filter(modeldata_E3, StateVar %in% SVs & dose_uM %in% doses),
+              aes(x = time, y = value, col = "M-E3"), linewidth = 1.5) +
+  facet_grid(cols = vars(dose_uM), rows = vars(StateVar), scales = "free", 
+             labeller = labeller(dose_uM = dose_names)) +
+  scale_color_manual(name = "Model", breaks = c("M-E0", "M-E1", "M-E2", "M-E3"),
+                     values = c("M-E0" = "firebrick", "M-E1" = "royalblue", 
+                                "M-E2" = "goldenrod","M-E3" = "darkolivegreen")) +
+  xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + 
+  labs(shape = "Replicate")
+
+plot(FigureS8)
+
+if(SaveFigures == 1){
+  ggsave("FigureS8.pdf", plot = FigureS8, path = "..//Figures", width = 30,
+         height = 10, units = "cm", dpi = 300)
+}
+```
+
+# Crosstalk model DEM
+
+Simulation of different crosstalk models for exposure to DEM.
+
+```{r}
+#Model D0
+simu_pars_D0 = simu_pars_OSRbase %>%
+  rename(value1 = est_value) %>%
+  select(-init_value) %>%
+  full_join(simu_pars_DDRbase) %>%
+  rename(value2 = est_value) %>%
+  mutate(est_value = ifelse(is.na(value1), value2, value1)) %>%
+  select(-init_value) %>%
+  select(c(X,est_value))
+modeldata_D0 = include_p53(run_model(Model_D0, tspan, doses_DEM, ECs_DEM, 
+                                     inistate_combi, simu_pars_D0$X, 
+                                     simu_pars_D0$est_value))
+
+#Model D1
+file = list.files("..//FittingResults", pattern='ModelD1')
+simu_pars_D1 = read.csv(file  = paste("..//FittingResults//", file, sep = ""), 
+                             header = TRUE) %>%
+  rename(value1 = est_value) %>%
+  select(-init_value) %>%
+  full_join(simu_pars_D0) %>%
+  rename(value2 = est_value) %>%
+  mutate(est_value = ifelse(is.na(value1), value2, value1)) %>%
+  select(c(X,est_value))
+modeldata_D1 = include_p53(run_model(Model_D1, tspan, doses_DEM, ECs_DEM, 
+                                     inistate_combi, simu_pars_D1$X, 
+                                     simu_pars_D1$est_value))
+
+# Model D2
+file = list.files("..//FittingResults", pattern='ModelD2')
+simu_pars_D2 = read.csv(file  = paste("..//FittingResults//", file, sep = ""),
+                             header = TRUE) %>%
+  rename(value1 = est_value) %>%
+  select(-init_value) %>%
+  full_join(simu_pars_D0) %>%
+  rename(value2 = est_value) %>%
+  mutate(est_value = ifelse(is.na(value1), value2, value1)) %>%
+  select(c(X,est_value))
+modeldata_D2 = include_p53(run_model(Model_D2, tspan, doses_DEM, ECs_DEM, 
+                                     inistate_combi, simu_pars_D2$X, 
+                                     simu_pars_D2$est_value))
+
+#Model D3
+file = list.files("..//FittingResults", pattern='ModelD3')
+simu_pars_D3 = read.csv(file  = paste("..//FittingResults//", file, sep = ""), 
+                             header = TRUE) %>%
+  rename(value1 = est_value) %>%
+  select(-init_value) %>%
+  full_join(simu_pars_D0) %>%
+  rename(value2 = est_value) %>%
+  mutate(est_value = ifelse(is.na(value1), value2, value1)) %>%
+  select(c(X,est_value))
+modeldata_D3 = include_p53(run_model(Model_D3, tspan, doses_DEM, ECs_DEM, 
+                                     inistate_combi, simu_pars_D3$X, 
+                                     simu_pars_D3$est_value))
+
+#Model D4
+file = list.files("..//FittingResults", pattern='ModelD4')
+simu_pars_D4 = read.csv(file  = paste("..//FittingResults//", file, sep = ""), 
+                             header = TRUE) %>%
+  rename(value1 = est_value) %>%
+  select(-init_value) %>%
+  full_join(simu_pars_D0) %>%
+  rename(value2 = est_value) %>%
+  mutate(est_value = ifelse(is.na(value1), value2, value1)) %>%
+  select(c(X,est_value))
+modeldata_D4 = include_p53(run_model(Model_D4, tspan, doses_DEM, ECs_DEM, 
+                                     inistate_combi, simu_pars_D4$X, 
+                                     simu_pars_D4$est_value))
+
+#Model D5
+file = list.files("..//FittingResults", pattern='ModelD5')
+simu_pars_D5 = read.csv(file  = paste("..//FittingResults//", file, sep = ""), 
+                             header = TRUE) %>%
+  rename(value1 = est_value) %>%
+  select(-init_value) %>%
+  full_join(simu_pars_D0) %>%
+  rename(value2 = est_value) %>%
+  mutate(est_value = ifelse(is.na(value1), value2, value1)) %>%
+  select(c(X,est_value))
+modeldata_D5 = include_p53(run_model(Model_D5, tspan, doses_DEM, ECs_DEM, 
+                                     inistate_combi, simu_pars_D5$X, 
+                                     simu_pars_D5$est_value))
+
+#Model D6
+file = list.files("..//FittingResults", pattern='ModelD6')
+simu_pars_D6 = read.csv(file  = paste("..//FittingResults//", file, sep = ""), 
+                             header = TRUE) %>%
+  rename(value1 = est_value) %>%
+  select(-init_value) %>%
+  full_join(simu_pars_D0) %>%
+  rename(value2 = est_value) %>%
+  mutate(est_value = ifelse(is.na(value1), value2, value1)) %>%
+  select(c(X,est_value))
+modeldata_D6 = include_p53(run_model(Model_D6, tspan, doses_DEM, ECs_DEM, 
+                                     inistate_combi, simu_pars_D6$X, 
+                                     simu_pars_D6$est_value))
+
+```
+
+## Table 2: cost, AIC, BIC for models M-D1 to M-D6
+
+Computation of cost, AIC and BIC for each model version.
+
+```{r}
+AIC_D0 = compute_AIC(measurements_DEM, c("p53", "MDM2"), 0, Model_D0, doses_DEM,
+                     ECs_DEM, inistate_combi,simu_pars_D0$X, simu_pars_D0$est_value)
+
+AIC_D1 = compute_AIC(measurements_DEM, c("p53", "MDM2"), 5, Model_D1, doses_DEM,
+                     ECs_DEM, inistate_combi,simu_pars_D1$X, simu_pars_D1$est_value)
+AIC_D2 = compute_AIC(measurements_DEM, c("p53", "MDM2"), 4, Model_D2, doses_DEM,
+                     ECs_DEM, inistate_combi,simu_pars_D2$X, simu_pars_D2$est_value)
+AIC_D3 = compute_AIC(measurements_DEM, c("p53", "MDM2"), 6, Model_D3, doses_DEM,
+                     ECs_DEM, inistate_combi,simu_pars_D3$X, simu_pars_D3$est_value)
+AIC_D4 = compute_AIC(measurements_DEM, c("p53", "MDM2"), 11, Model_D4, doses_DEM,
+                     ECs_DEM, inistate_combi,simu_pars_D4$X, simu_pars_D4$est_value)
+AIC_D5 = compute_AIC(measurements_DEM, c("p53", "MDM2"), 10, Model_D5, doses_DEM,
+                     ECs_DEM, inistate_combi,simu_pars_D5$X, simu_pars_D5$est_value)
+AIC_D6 = compute_AIC(measurements_DEM, c("p53", "MDM2"), 12, Model_D6, doses_DEM,
+                     ECs_DEM, inistate_combi,simu_pars_D6$X, simu_pars_D6$est_value)
+```
+
+## Figure 4bc: crosstalk models DEM - 10 & 200 uM
+
+Plotting of the crosstalk models for exposure to 20 & 200 uM DEM.
+
+```{r}
+SVs = c("p53", "MDM2")
+doses = c(20,200)
+
+Figure4b = ggplot() + theme_bw() +
+  geom_point(data = filter(measurements_DEM, StateVar %in% SVs & dose_uM %in% doses),
+             aes(x = timeAfterExposure, y = data4modelReal, 
+                 shape = as.factor(replID)),color = "dark grey") + 
+  geom_line(data = filter(mean_DEM, StateVar %in% SVs & dose_uM %in% doses), 
+            aes(x = timepoints, y = mean_interpol), col = "black", 
+            linewidth = 1.5) +
+  geom_line(data = filter(modeldata_D0, StateVar %in% SVs & dose_uM %in% doses),
+            aes(x = time, y = value, col = "M-D0"), linewidth = 1.5) +
+  geom_line(data = filter(modeldata_D1, StateVar %in% SVs & dose_uM %in% doses),
+            aes(x = time, y = value, col = "M-D1"), linewidth = 1.5) +
+  geom_line(data = filter(modeldata_D2, StateVar %in% SVs & dose_uM %in% doses),
+              aes(x = time, y = value, col = "M-D2"), linewidth = 1.5) +
+  geom_line(data = filter(modeldata_D3, StateVar %in% SVs & dose_uM %in% doses),
+              aes(x = time, y = value, col = "M-D3"), linewidth = 1.5) +
+  facet_grid(cols = vars(dose_uM), rows = vars(StateVar), scales = "free", 
+             labeller = labeller(dose_uM = dose_names)) +
+  scale_color_manual(name = "Model", breaks = c("M-D0", "M-D1", "M-D2", "M-D3"),
+                     values = c("M-D0" = "firebrick", "M-D1" = "mediumorchid", 
+                                "M-D2" = "darkorange","M-D3" = "darkolivegreen")) +
+  xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + theme(legend.position = "bottom") +
+  labs(shape = "Replicate") + guides(color=guide_legend(nrow=2,byrow=TRUE), 
+                                     shape = guide_legend(nrow=2,byrow=TRUE))
+
+plot(Figure4b)
+
+Figure4c = ggplot() + theme_bw() +
+  geom_point(data = filter(measurements_DEM, StateVar %in% SVs & dose_uM %in% doses),
+             aes(x = timeAfterExposure, y = data4modelReal, shape = as.factor(replID)),
+           color = "dark grey") + 
+  geom_line(data = filter(mean_DEM, StateVar %in% SVs & dose_uM %in% doses), 
+            aes(x = timepoints, y = mean_interpol), col = "black", linewidth = 1.5) +
+  geom_line(data = filter(modeldata_D4, StateVar %in% SVs & dose_uM %in% doses),
+            aes(x = time, y = value, col = "M-D4"), linewidth = 2, linetype = "solid") +
+  geom_line(data = filter(modeldata_D5, StateVar %in% SVs & dose_uM %in% doses),
+              aes(x = time, y = value, col = "M-D5"), linewidth = 1.5, linetype = "solid") +
+  geom_line(data = filter(modeldata_D6, StateVar %in% SVs & dose_uM %in% doses),
+              aes(x = time, y = value, col = "M-D6"), linewidth = 1.5, linetype = "solid") +
+  facet_grid(cols = vars(dose_uM), rows = vars(StateVar), scales = "free", 
+             labeller = labeller(dose_uM = dose_names)) +
+  scale_color_manual(name = "Model", breaks = c("M-D4", "M-D5", "M-D6"),
+                     values = c("M-D0" = "firebrick","M-D4" = "mediumorchid", 
+                                "M-D5" = "darkorange","M-D6" = "darkolivegreen")) +
+  xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + theme(legend.position = "bottom") +
+  labs(shape = "Replicate") + guides(color=guide_legend(nrow=2,byrow=TRUE), 
+                                     shape = guide_legend(nrow=2,byrow=TRUE))
+
+plot(Figure4c)
+
+if(SaveFigures == 1){
+  ggsave("Figure4b.svg", plot = Figure4b, path = "..//Figures", width = 12,
+         height = 12, units = "cm", dpi = 300)
+  ggsave("Figure4c.svg", plot = Figure4c, path = "..//Figures", width = 12,
+         height = 12, units = "cm", dpi = 300)
+}
+```
+
+### Figure S9: crosstalk models DEM - all concentrations
+
+Plotting of the crosstalk models for exposure to all concentrations DEM.
+
+```{r}
+SVs = c("p53", "MDM2")
+doses = doses_DEM
+
+FigureS9a = ggplot() + theme_bw() +
+  geom_point(data = filter(measurements_DEM, StateVar %in% SVs & dose_uM %in% doses),
+             aes(x = timeAfterExposure, y = data4modelReal, shape = as.factor(replID)),
+           color = "dark grey") + 
+  geom_line(data = filter(mean_DEM, StateVar %in% SVs &dose_uM %in% doses), 
+            aes(x = timepoints, y = mean_interpol), col = "black", linewidth = 1.5) +
+  geom_line(data = filter(modeldata_D0, StateVar %in% SVs & dose_uM %in% doses),
+            aes(x = time, y = value, col = "M-D0"), linewidth = 1.5) +
+  geom_line(data = filter(modeldata_D1, StateVar %in% SVs & dose_uM %in% doses),
+            aes(x = time, y = value, col = "M-D1"), linewidth = 1.5) +
+  geom_line(data = filter(modeldata_D2, StateVar %in% SVs & dose_uM %in% doses),
+              aes(x = time, y = value, col = "M-D2"), linewidth = 1.5) +
+  geom_line(data = filter(modeldata_D3, StateVar %in% SVs & dose_uM %in% doses),
+              aes(x = time, y = value, col = "M-D3"), linewidth = 1.5) +
+  facet_grid(cols = vars(dose_uM), rows = vars(StateVar), scales = "free", 
+             labeller = labeller(dose_uM = dose_names)) +
+  scale_color_manual(name = "Model", breaks = c("M-D0", "M-D1", "M-D2", "M-D3"),
+                     values = c("M-D0" = "firebrick", "M-D1" = "mediumorchid", 
+                                "M-D2" = "darkorange","M-D3" = "darkolivegreen")) +
+  xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + 
+  labs(shape = "Replicate")
+
+plot(FigureS9a)
+
+FigureS9b = ggplot() + theme_bw() +
+  geom_point(data = filter(measurements_DEM, StateVar %in% SVs & dose_uM %in% doses),
+             aes(x = timeAfterExposure, y = data4modelReal, shape = as.factor(replID)),
+           color = "dark grey") + 
+  geom_line(data = filter(mean_DEM, StateVar %in% SVs &dose_uM %in% doses), 
+            aes(x = timepoints, y = mean_interpol), col = "black", linewidth = 1.5) +
+  geom_line(data = filter(modeldata_D4, StateVar %in% SVs & dose_uM %in% doses),
+            aes(x = time, y = value, col = "M-D4"), linewidth = 1.5) +
+  geom_line(data = filter(modeldata_D5, StateVar %in% SVs & dose_uM %in% doses),
+              aes(x = time, y = value, col = "M-D5"), linewidth = 1.5) +
+  geom_line(data = filter(modeldata_D6, StateVar %in% SVs & dose_uM %in% doses),
+              aes(x = time, y = value, col = "M-D6"), linewidth = 1.5) +
+  facet_grid(cols = vars(dose_uM), rows = vars(StateVar), scales = "free", 
+             labeller = labeller(dose_uM = dose_names)) +
+  scale_color_manual(name = "Model", breaks = c("M-D0", "M-D4", "M-D5", "M-D6"),
+                     values = c("M-D0" = "firebrick", "M-D4" = "mediumorchid", 
+                                "M-D5" = "darkorange","M-D6" = "darkolivegreen")) +
+  xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + 
+  labs(shape = "Replicate")
+
+plot(FigureS9b)
+
+if(SaveFigures == 1){
+  ggsave("FigureS9a.svg", plot = FigureS9a, path = "..//Figures", width = 30,
+         height = 10, units = "cm", dpi = 300)
+  ggsave("FigureS9b.svg", plot = FigureS9b, path = "..//Figures", width = 30,
+         height = 10, units = "cm", dpi = 300)
+}
+```
+
+### Figure S10: Adapted MDM2 production
+
+Simulation of model M-D3 with 8x higher maximal production of MDM2 via NRF2.
+
+```{r}
+file = list.files("..//FittingResults", pattern='ModelD3')
+simu_pars_D3_2 = read.csv(file  = paste("..//FittingResults//", file, sep = ""), 
+                             header = TRUE) %>%
+  rename(value1 = est_value) %>%
+  select(-init_value) %>%
+  full_join(simu_pars_D0) %>%
+  rename(value2 = est_value) %>%
+  mutate(est_value = ifelse(is.na(value1), value2, value1)) %>%
+  select(c(X,est_value))
+
+simu_pars_D3_2$est_value[simu_pars_D3_2$X == "VmaxM2_byN2"] = 8*simu_pars_D3_2$est_value[simu_pars_D3_2$X == "VmaxM2_byN2"]
+
+modeldata_D3_2 = include_p53(run_model(Model_D3, tspan, doses_DEM, ECs_DEM, 
+                                     inistate_combi, simu_pars_D3_2$X, 
+                                     simu_pars_D3_2$est_value))
+
+SVs = c("p53", "MDM2")
+doses = c(20,200)
+
+FigureS10 = ggplot() + theme_bw() +
+  geom_point(data = filter(measurements_DEM, StateVar %in% SVs & dose_uM %in% doses),
+             aes(x = timeAfterExposure, y = data4modelReal, 
+                 shape = as.factor(replID)),color = "dark grey") + 
+  geom_line(data = filter(mean_DEM, StateVar %in% SVs & dose_uM %in% doses), 
+            aes(x = timepoints, y = mean_interpol, col = "Mean"), 
+            linewidth = 1.5) +
+  geom_line(data = filter(modeldata_D3_2, StateVar %in% SVs & dose_uM %in% doses),
+              aes(x = time, y = value, col = "Simulation"), linewidth = 1.5) +
+  facet_grid(cols = vars(dose_uM), rows = vars(StateVar), scales = "free", 
+             labeller = labeller(dose_uM = dose_names)) +
+  scale_color_manual(name = "", breaks = c("Mean", "Simulation"),
+                     values = c("Mean" = "black","Simulation" = "cyan4")) +
+  xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + 
+  labs(shape = "Replicate")
+
+plot(FigureS10)
+
+if(SaveFigures == 1){
+  ggsave("FigureS10.pdf", plot = FigureS10, path = "..//Figures", width = 15,
+         height = 10, units = "cm", dpi = 300)
+}
+
+```
+
+# Sentitivity analysis
+
+## For model E1
+
+Performing the local sensitivity analysis for model E1.
+
+```{r message=FALSE, warning=FALSE}
+tspan_pre <-  seq(0, 5000, by = 1)
+
+parms_E1 = simu_pars_E1$X
+sensitivity_E1 = data.frame()
+
+for (i in parms_E1){
+simu_pars_E1_high = simu_pars_E1 %>%
+  mutate(est_value = ifelse(X == i, est_value*1.2, est_value))
+simu_pars_E1_low = simu_pars_E1 %>%
+  mutate(est_value = ifelse(X == i, est_value*0.8, est_value))
+
+ic_high = modeldose(Model_E1, 0, tspan_pre, inistate_combi, simu_pars_E1$X,
+                    simu_pars_E1_high$est_value)
+modeldata_E1_high = include_p53(run_model(Model_E1, tspan, doses_ETO, ECs_ETO,
+                                          ic_high[nrow(ic_high),3:ncol(ic_high)],
+                                          simu_pars_E1$X, simu_pars_E1_high$est_value)) %>%
+  rename(high_value = value)
+
+ic_low = modeldose(Model_E1, 0, tspan_pre, inistate_combi, simu_pars_E1$X,
+                    simu_pars_E1_low$est_value)
+modeldata_E1_low = include_p53(run_model(Model_E1, tspan, doses_ETO, ECs_ETO,
+                                          ic_low[nrow(ic_low),3:ncol(ic_low)],
+                                          simu_pars_E1$X, simu_pars_E1_low$est_value)) %>%
+  rename(low_value = value)
+
+combined_modeldata = modeldata_E1_high %>%
+  left_join(modeldata_E1_low) %>%
+  mutate(diff = high_value-low_value) %>%
+  add_column(parm = i) %>%
+  add_column(parm_value = simu_pars_E1$est_value[simu_pars_E1$X == i]*0.4)
+
+sensitivity_E1 = rbind(sensitivity_E1, combined_modeldata)
+
+}
+```
+
+### Figure S11a: Sensitivity of each parameter for E1.
+
+This figure shows the magnitude of the effect of varying the different parameters on the model simulation.
+
+```{r message=FALSE, warning=FALSE}
+filter_E1 = sensitivity_E1 %>%
+  group_by(parm) %>%
+  summarise(sum_diff = sum(abs(diff))) %>%
+  filter(sum_diff > 0 | sum_diff < 0) %>%
+  select(parm)
+
+sensitivity_E1_f = sensitivity_E1 %>%
+  filter(parm %in% filter_E1$parm)
+
+sensitivity_E1_summary = sensitivity_E1_f %>%
+  group_by(StateVar, parm) %>%
+  summarise(sum_diff = sum(abs(diff)),
+            score = sum_diff/parm_value)
+
+FigureS11a = ggplot(filter(sensitivity_E1_summary, 
+                           StateVar %in% c("p53", "MDM2", "NRF2", "SRXN1"))) +
+  theme_bw() + geom_point(aes(x = parm, y = sum_diff)) +
+  facet_grid(rows = vars(StateVar), scales = "free") + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  scale_x_discrete(breaks = c("KmB2", "KmM2_byP5p", "KmN2_deg", "KmP2", "Km_K1",
+                              "Km_S1", "VmaxB2", "VmaxM2_byP5p", "VmaxN2_deg", 
+                              "VmaxP2", "Vmax_K1", "Vmax_S1", "buildB2", "buildD",
+                              "buildK1", "buildM2", "buildN2", "buildP2", "buildP5",
+                              "buildS1", "ct_M15", "degradB2", "degradD_byP5",
+                              "degradK1", "degradM2", "degradN2", "degradP2",
+                              "degradP5", "degradP5_byM2", "degradP5p", 
+                              "degradP5p_byM2", "degradS1", "dephos", "hillK1", 
+                              "hillS1", "n", "phos", "tau1"), 
+                   label = c(expression(Km[B2]), expression(Km[M2~p53p]), 
+                             expression(Km[N2]), expression(Km[p21]),
+                             expression(Km[K1]), expression(Km[S1]), 
+                             expression(V[B2]), expression(V[M2~p53p]),
+                             expression(Vd[N2]), expression(V[p21]),
+                             expression(V[K1]), expression(V[S1]),
+                             expression(b[B2]), expression(b[DD]), 
+                             expression(b[K1]), expression(b[M2]), 
+                             expression(b[N2]), expression(b[p21]),
+                             expression(b[p53]), expression(b[S1]), 
+                             expression(C[p21]), expression(d[B2]), 
+                             expression(d[DD~p53]), expression(d[K1]), 
+                             expression(d[M2]), expression(d[N2]),
+                             expression(d[p21]), expression(d[p53]), 
+                             expression(d[p53~M2]), expression(d[p53p]), 
+                             expression(d[p53p~M2]), expression(d[S1]), 
+                             expression(r[dp]), expression(n[K1]),
+                             expression(n[S1]), expression(n), 
+                             expression(r[p]), expression(tau[D]))) +
+  xlab("Parameters") + ylab("Sum of differences") 
+
+print(FigureS11a)
+
+if(SaveFigures == 1){
+  ggsave("FigureS11a.svg", plot = FigureS11a, path = "..//Figures", width = 20,
+         height = 12, units = "cm", dpi = 300)
+}
+
+```
+
+### Figure S11b: Simulations for increasing and decreasing certain parameters for the highest concentration ETO.
+
+
+
+```{r}
+selected_parms = c("Km_K1", "buildN2", "degrad_M2", "VmaxM2_byP5p", "buildP5", 
+                   "degradP5", "phos")
+
+parm_names = as_labeller(c(
+  "Km_K1"  = "Km[K1]",
+  "buildN2"  = "b[N2]",  
+  "degradM2"  = "d[M2]",
+  "VmaxM2_byP5p" = "V[M2~p53p]", 
+  "buildP5" = "b[p53]", 
+  "degradP5" = "d[p53]", 
+  "phos" = "r[p]"),
+   label_parsed)
+
+
+FigureS11b = ggplot() +
+  geom_point(data = filter(measurements_ETO, StateVar %in% c("p53", "MDM2", "NRF2", "SRXN1")
+                           & dose_uM == 25),
+             aes(x = timeAfterExposure, y = data4modelReal, shape = as.factor(replID)),
+           color = "dark grey") + theme_bw() +
+  geom_line(data = filter(sensitivity_E1, StateVar %in% c("p53", "MDM2", "NRF2", "SRXN1") &
+                             parm %in% selected_parms & dose_uM == 25),
+            aes(x = time, y = high_value, colour = "Increased parameter")) +
+  geom_line(data = filter(sensitivity_E1, StateVar %in% c("p53", "MDM2", "NRF2", "SRXN1") &
+                             parm %in% selected_parms & dose_uM == 25),
+            aes(x = time, y = low_value, colour = "Decreased parameter")) +
+  geom_line(data = filter(modeldata_E1, StateVar %in% c("p53", "MDM2", "NRF2", "SRXN1")
+                          & dose_uM == 25), aes(x = time, y = value, 
+                                                colour = "Unadapted simulation")) +
+  scale_color_manual(name = "", breaks = c("Unadapted simulation",
+                                           "Increased parameter", 
+                                           "Decreased parameter"),
+                     values = c("Unadapted simulation" = "black", 
+                                "Increased parameter" = "red", 
+                                "Decreased parameter" = "blue"),
+                     labels = c("\nUnadapted \nsimulation", 
+                                "\nIncreased \nparameter", 
+                                "\nDecreased \nparameter"),) +
+  facet_grid(cols = vars(parm), rows = vars(StateVar), scales = "free",
+             labeller = labeller(parm = parm_names)) +
+  xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + 
+  labs(shape = "Replicate")
+
+print(FigureS11b)
+
+if(SaveFigures == 1){
+  ggsave("FigureS11b.svg", plot = FigureS11b, path = "..//Figures", width = 20,
+         height = 16, units = "cm", dpi = 300)
+}
+
+```
+
+## For model D4
+
+Performing the local sensitivity analysis for model D4.
+
+```{r message=FALSE, warning=FALSE}
+parms_D4 = simu_pars_D4$X
+sensitivity_D4 = data.frame()
+
+for (i in parms_D4){
+simu_pars_D4_high = simu_pars_D4 %>%
+  mutate(est_value = ifelse(X == i, est_value*1.2, est_value))
+simu_pars_D4_low = simu_pars_D4 %>%
+  mutate(est_value = ifelse(X == i, est_value*0.8, est_value))
+
+
+ic_high = modeldose(Model_D4, 0, tspan_pre, inistate_combi, simu_pars_D4$X,
+                    simu_pars_D4_high$est_value)
+modeldata_D4_high = include_p53(run_model(Model_D4, tspan, doses_DEM, ECs_DEM,
+                                          ic_high[nrow(ic_high),3:ncol(ic_high)],
+                                          simu_pars_D4$X, simu_pars_D4_high$est_value)) %>%
+  rename(high_value = value)
+
+ic_low = modeldose(Model_D4, 0, tspan_pre, inistate_combi, simu_pars_D4$X,
+                    simu_pars_D4_low$est_value)
+modeldata_D4_low = include_p53(run_model(Model_D4, tspan, doses_DEM, ECs_DEM,
+                                          ic_low[nrow(ic_low),3:ncol(ic_low)],
+                                          simu_pars_D4$X, simu_pars_D4_low$est_value)) %>%
+  rename(low_value = value)
+
+
+combined_modeldata = modeldata_D4_high %>%
+  left_join(modeldata_D4_low) %>%
+  mutate(diff = high_value-low_value) %>%
+  add_column(parm = i) %>%
+  add_column(parm_value = simu_pars_D4$est_value[simu_pars_D4$X == i]*0.4)
+
+sensitivity_D4 = rbind(sensitivity_D4, combined_modeldata)
+
+}
+```
+
+### Figure S12a: Sensitivity of each parameter for E1.
+
+This figure shows the magnitude of the effect of varying the different parameters on the model simulation.
+
+```{r message=FALSE, warning=FALSE}
+filter_D4 = sensitivity_D4 %>%
+  group_by(parm) %>%
+  summarise(sum_diff = sum(abs(diff))) %>%
+  filter(sum_diff > 0 | sum_diff < 0) %>%
+  select(parm)
+
+sensitivity_D4_f = sensitivity_D4 %>%
+  filter(parm %in% filter_D4$parm)
+
+sensitivity_D4_summary = sensitivity_D4_f %>%
+  group_by(StateVar, parm) %>%
+  summarise(sum_diff = sum(abs(diff)),
+            score = sum_diff/parm_value)
+
+FigureS12a = ggplot(filter(sensitivity_D4_summary, 
+                           StateVar %in% c("p53", "MDM2", "NRF2", "SRXN1"))) +
+  theme_bw() + geom_point(aes(x = parm, y = sum_diff)) +
+  facet_grid(rows = vars(StateVar), scales = "free") + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+    scale_x_discrete(breaks = c("KmB2", "KmM2_byP5p", "KmN2_deg", "KmP2", "Km_K1",
+                              "Km_S1", "VmaxB2", "VmaxM2_byP5p", "VmaxN2_deg", 
+                              "VmaxP2", "Vmax_K1", "Vmax_S1", "buildB2", "buildD",
+                              "buildK1", "buildM2", "buildN2", "buildP2", "buildP5",
+                              "buildS1", "ct_M15", "degradB2", "degradD_byP5",
+                              "degradK1", "degradM2", "degradN2", "degradP2",
+                              "degradP5", "degradP5_byM2", "degradP5p", 
+                              "degradP5p_byM2", "degradS1", "dephos", "hillK1", 
+                              "hillS1", "n", "phos", "tau1", "sc_S",
+                              "k_K1_modification", "k_K1_unmodification",
+                              "hillM2_byN2", "hillP5_byM2", "hillP5p_byM2",
+                              "Km_S", "KmP5_byM2", "KmP5p_byM2", "KmM2_byN2",
+                              "VmaxM2_byN2"), 
+                   label = c(expression(Km[B2]), expression(Km[M2~p53p]), 
+                             expression(Km[N2]), expression(Km[p21]),
+                             expression(Km[K1]), expression(Km[S1]), 
+                             expression(V[B2]), expression(V[M2~p53p]),
+                             expression(Vd[N2]), expression(V[p21]),
+                             expression(V[K1]), expression(V[S1]),
+                             expression(b[B2]), expression(b[DD]), 
+                             expression(b[K1]), expression(b[M2]), 
+                             expression(b[N2]), expression(b[p21]),
+                             expression(b[p53]), expression(b[S1]), 
+                             expression(C[p21]), expression(d[B2]), 
+                             expression(d[DD~p53]), expression(d[K1]), 
+                             expression(d[M2]), expression(d[N2]),
+                             expression(d[p21]), expression(d[p53]), 
+                             expression(d[p53~M2]), expression(d[p53p]), 
+                             expression(d[p53p~M2]), expression(d[S1]), 
+                             expression(r[dp]), expression(n[K1]),
+                             expression(n[S1]), expression(n), 
+                             expression(r[p]), expression(tau[D]),
+                             expression(sc[S]), expression(r[m]),
+                             expression(r[um]), expression(n[M2]),
+                             expression(n[1]), expression(n[2]),
+                             expression(Km[S]), expression(Km[p53~M2]),
+                             expression(Km[p53p~M2]), expression(Km[M2~N2]),
+                             expression(V[M2~N2]))) +
+  xlab("Parameters") + ylab("Sum of differences")
+
+print(FigureS12a)
+
+if(SaveFigures == 1){
+  ggsave("FigureS12a.svg", plot = FigureS12a, path = "..//Figures", width = 20,
+         height = 12, units = "cm", dpi = 300)
+}
+
+```
+
+### Figure S12b: Simulations for increasing and decreasing certain parameters for the highest concentration DEM.
+
+
+
+```{r}
+selected_parms = c("KmP5_byM2", "KmM2_byP5p", "Km_K1", "buildN2", "degradM2")
+
+parm_names = as_labeller(c(
+  "KmP5_byM2" = "Km[p53~M2]",
+  "KmM2_byP5p"  = "Km[M2~p53p]",
+  "Km_K1"  = "Km[K1]",
+  "buildN2"  = "b[N2]",  
+  "degradM2"  = "d[M2]"),
+   label_parsed)
+
+FigureS12b = ggplot() +
+  geom_point(data = filter(measurements_DEM, StateVar %in% c("p53", "MDM2", "NRF2", "SRXN1")
+                           & dose_uM == 200),
+             aes(x = timeAfterExposure, y = data4modelReal, shape = as.factor(replID)),
+           color = "dark grey") + theme_bw() +
+  geom_line(data = filter(sensitivity_D4, StateVar %in% c("p53", "MDM2", "NRF2", "SRXN1") &
+                             parm %in% selected_parms & dose_uM == 200),
+            aes(x = time, y = high_value, colour = "Increased parameter")) +
+  geom_line(data = filter(sensitivity_D4, StateVar %in% c("p53", "MDM2", "NRF2", "SRXN1") &
+                             parm %in% selected_parms & dose_uM == 200),
+            aes(x = time, y = low_value, colour = "Decreased parameter")) +
+  geom_line(data = filter(modeldata_D4, StateVar %in% c("p53", "MDM2", "NRF2", "SRXN1")
+                          & dose_uM == 200), aes(x = time, y = value, colour = "Unadapted simulation")) +
+  scale_color_manual(name = "", breaks = c("Unadapted simulation",
+                                           "Increased parameter", 
+                                           "Decreased parameter"),
+                     values = c("Unadapted simulation" = "black", 
+                                "Increased parameter" = "red", 
+                                "Decreased parameter" = "blue"),
+                     labels = c("\nUnadapted \nsimulation", 
+                                "\nIncreased \nparameter", 
+                                "\nDecreased \nparameter"),) +
+  facet_grid(cols = vars(parm), rows = vars(StateVar), scales = "free",
+             labeller = labeller(parm = parm_names)) +
+  xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + 
+  labs(shape = "Replicate")
+
+print(FigureS12b)
+
+if(SaveFigures == 1){
+  ggsave("FigureS12b.svg", plot = FigureS12b, path = "..//Figures", width = 20,
+         height = 16, units = "cm", dpi = 300)
+}
+
+```
+
+# Combined & knock-down model
+
+Simulation of the combined models.
+
+```{r}
+simu_pars_CE = simu_pars_E1 %>%
+  add_row(X = "VmaxM2_byN2", est_value = simu_pars_D4$est_value[simu_pars_D4$X=="VmaxM2_byN2"]) %>%
+  add_row(X = "hillM2_byN2", est_value = simu_pars_D4$est_value[simu_pars_D4$X=="hillM2_byN2"]) %>%
+  add_row(X = "KmM2_byN2", est_value = simu_pars_D4$est_value[simu_pars_D4$X=="KmM2_byN2"])
+
+
+ic = modeldose(Model_CE, 0, tspan_pre, inistate_combi, simu_pars_CE$X, 
+               simu_pars_CE$est_value)
+modeldata_CE = include_p53(run_model(Model_CE, tspan, doses_ETO, ECs_ETO, 
+                                     ic[nrow(ic),3:ncol(ic)], simu_pars_CE$X, 
+                                     simu_pars_CE$est_value))
+
+simu_pars_CD = simu_pars_D4 %>%
+  add_row(X = "ct_M15", est_value = simu_pars_E1$est_value[simu_pars_E1$X=="ct_M15"])
+
+ic = modeldose(Model_CD, 0, tspan_pre, inistate_combi, simu_pars_CD$X, 
+               simu_pars_CD$est_value)
+modeldata_CD = include_p53(run_model(Model_CD, tspan, doses_DEM, ECs_DEM, 
+                                     ic[nrow(ic),3:ncol(ic)], simu_pars_CD$X, 
+                                     simu_pars_CD$est_value))
+```
+
+## Figure 5ab: combined models
+
+Plotting of the combined models for 25 uM etoposide and 200 uM DEM.
+
+```{r}
+SVs = c("NRF2", "SRXN1","p53", "MDM2")
+
+doses = 25
+Figure5a = ggplot() + theme_bw() +
+  geom_point(data = filter(measurements_ETO, StateVar %in% SVs & dose_uM %in% doses),
+             aes(x = timeAfterExposure, y = data4modelReal, shape = as.factor(replID)),
+           color = "dark grey") + 
+  geom_line(data = filter(mean_ETO, StateVar %in% SVs & dose_uM %in% doses), 
+            aes(x = timepoints, y = mean_interpol), col = "black", linewidth = 1.5) +
+  geom_line(data = filter(modeldata_E1, StateVar %in% SVs & dose_uM %in% doses),
+            aes(x = time, y = value, col = "M-E1"), linewidth = 2, linetype = "solid") +
+  geom_line(data = filter(modeldata_CE, StateVar %in% SVs & dose_uM %in% doses),
+              aes(x = time, y = value, col = "M-CE"), linewidth = 1.5, linetype = "solid") +
+  facet_wrap(vars(StateVar), scales = "free", nrow=1) +
+  scale_color_manual(name = "Model", breaks = c("M-E1", "M-CE"),
+                     values = c("M-E1" = "royalblue", "M-CE" = "firebrick")) +
+  xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + 
+  labs(shape = "Replicate", title = expression(paste("Etoposide (25 ", mu, "M)")))
+plot(Figure5a)
+
+doses = 200
+Figure5b = ggplot() + theme_bw() +
+  geom_point(data = filter(measurements_DEM, StateVar %in% SVs & dose_uM %in% doses),
+             aes(x = timeAfterExposure, y = data4modelReal, shape = as.factor(replID)),
+           color = "dark grey") + 
+  geom_line(data = filter(mean_DEM, StateVar %in% SVs & dose_uM %in% doses), 
+            aes(x = timepoints, y = mean_interpol), col = "black", linewidth = 1.5) +
+  geom_line(data = filter(modeldata_D4, StateVar %in% SVs & dose_uM %in% doses),
+            aes(x = time, y = value, col = "M-D4"), linewidth = 2, linetype = "solid") +
+  geom_line(data = filter(modeldata_CD, StateVar %in% SVs & dose_uM %in% doses),
+              aes(x = time, y = value, col = "M-DE"), linewidth = 1.5, linetype = "solid") +
+  facet_wrap(vars(StateVar), scales = "free", nrow=1) + 
+  scale_color_manual(name = "Model", breaks = c("M-D4", "M-DE"),
+                     values = c("M-D4" = "mediumorchid", "M-DE" = "firebrick")) +
+  xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + 
+  labs(shape = "Replicate", title =  expression(paste("DEM (200 ", mu, "M)")))
+plot(Figure5b)
+
+if(SaveFigures == 1){
+  ggsave("Figure5a.svg", plot = Figure5a, path = "..//Figures", width = 29.45,
+         height = 7, units = "cm", dpi = 300)
+  ggsave("Figure5b.svg", plot = Figure5b, path = "..//Figures", width = 29.45,
+         height = 7, units = "cm", dpi = 300)
+}
+```
+
+### Figure S13: combined model all doses
+
+Plotting of the combined models for all concentrations of etoposide and DEM.
+
+```{r}
+SVs = c("NRF2", "SRXN1","p53", "MDM2")
+
+doses = doses_ETO
+FigureS13a = ggplot() + theme_bw() +
+  geom_point(data = filter(measurements_ETO, StateVar %in% SVs & dose_uM %in% doses),
+             aes(x = timeAfterExposure, y = data4modelReal, shape = as.factor(replID)),
+           color = "dark grey") + 
+  geom_line(data = filter(mean_ETO, StateVar %in% SVs & dose_uM %in% doses), 
+            aes(x = timepoints, y = mean_interpol), col = "black", linewidth = 1.5) +
+  geom_line(data = filter(modeldata_E1, StateVar %in% SVs & dose_uM %in% doses),
+            aes(x = time, y = value, col = "M-E1"), linewidth = 2, linetype = "solid") +
+  geom_line(data = filter(modeldata_CE, StateVar %in% SVs & dose_uM %in% doses),
+              aes(x = time, y = value, col = "M-CE"), linewidth = 1.5, linetype = "solid") +
+  facet_grid(cols = vars(dose_uM), rows = vars(StateVar), scales = "free", 
+             labeller = labeller(dose_uM = dose_names)) +
+  scale_color_manual(name = "Model", breaks = c("M-E1", "M-CE"),
+                     values = c("M-E1" = "royalblue", "M-CE" = "firebrick")) +
+  xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + 
+  labs(shape = "Replicate", title = "Etoposide")
+plot(FigureS13a)
+
+doses = doses_DEM
+FigureS13b = ggplot() + theme_bw() +
+  geom_point(data = filter(measurements_DEM, StateVar %in% SVs & dose_uM %in% doses),
+             aes(x = timeAfterExposure, y = data4modelReal, shape = as.factor(replID)),
+           color = "dark grey") + 
+  geom_line(data = filter(mean_DEM, StateVar %in% SVs & dose_uM %in% doses), 
+            aes(x = timepoints, y = mean_interpol), col = "black", linewidth = 1.5) +
+  geom_line(data = filter(modeldata_D4, StateVar %in% SVs & dose_uM %in% doses),
+            aes(x = time, y = value, col = "M-D4"), linewidth = 2, linetype = "solid") +
+  geom_line(data = filter(modeldata_CD, StateVar %in% SVs & dose_uM %in% doses),
+              aes(x = time, y = value, col = "M-DE"), linewidth = 1.5, linetype = "solid") +
+  facet_grid(cols = vars(dose_uM), rows = vars(StateVar), scales = "free", 
+             labeller = labeller(dose_uM = dose_names)) +
+  scale_color_manual(name = "Model", breaks = c("M-D4", "M-DE"),
+                     values = c("M-D4" = "mediumorchid", "M-DE" = "firebrick")) +
+  xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + 
+  labs(shape = "Replicate", title = "DEM")
+plot(FigureS13b)
+
+if(SaveFigures == 1){
+  ggsave("FigureS13a.svg", plot = FigureS13a, path = "..//Figures", width = 30,
+         height = 20, units = "cm", dpi = 300)
+  ggsave("FigureS13b.svg", plot = FigureS13b, path = "..//Figures", width = 30,
+         height = 20, units = "cm", dpi = 300)
+}
+
+```
+
+Simulation of the knock-down models.
+
+```{r}
+eff = 0.3
+KD_pars = c("KD_P53", "KD_P21", "KD_M2", "KD_N2")
+KD_names = c("KD P53", "KD P21", "KD MDM2", "KD NRF2")
+  
+simu_pars_CEKD = simu_pars_CE %>%
+  add_row(X = KD_pars, est_value = c(1,1,1,1))
+simu_pars_CDKD = simu_pars_CD %>%
+  add_row(X = KD_pars, est_value = c(1,1,1,1))
+
+for (i in 1:length(KD_pars)){
+  simu_pars_CEKD_temp = simu_pars_CEKD
+  simu_pars_CEKD_temp$est_value[simu_pars_CEKD_temp$X == KD_pars[i]] = eff
+  simu_pars_CDKD_temp = simu_pars_CDKD
+  simu_pars_CDKD_temp$est_value[simu_pars_CDKD_temp$X == KD_pars[i]] = eff
+  
+  ic = modeldose(Model_CEKD, 0, tspan_pre, inistate_combi, simu_pars_CEKD_temp$X, 
+               simu_pars_CEKD_temp$est_value)
+  modeldata_CEKD = include_p53(run_model(Model_CEKD, tspan, doses_ETO, ECs_ETO, 
+                                     ic[nrow(ic),3:ncol(ic)], simu_pars_CEKD_temp$X, 
+                                     simu_pars_CEKD_temp$est_value)) %>%
+    add_column(KD = KD_names[i])
+  
+  ic = modeldose(Model_CDKD, 0, tspan_pre, inistate_combi, simu_pars_CDKD_temp$X, 
+               simu_pars_CDKD_temp$est_value)
+  modeldata_CDKD = include_p53(run_model(Model_CDKD, tspan, doses_DEM, ECs_DEM, 
+                                     ic[nrow(ic),3:ncol(ic)], simu_pars_CDKD_temp$X, 
+                                     simu_pars_CDKD_temp$est_value))%>%
+    add_column(KD = KD_names[i])
+  
+  if (i==1){
+    modeldata_CEKD_all = modeldata_CEKD
+    modeldata_CDKD_all = modeldata_CDKD
+  } else {
+    modeldata_CEKD_all = rbind(modeldata_CEKD_all, modeldata_CEKD)
+    modeldata_CDKD_all = rbind(modeldata_CDKD_all, modeldata_CDKD)
+  }
+}
+
+```
+
+## Figure 5cd: knock-down model
+
+Plotting of the knock-down models for 25 uM etoposide and 200 uM DEM.
+
+```{r}
+SVs = c("NRF2", "SRXN1","p53", "MDM2")
+
+doses = 25
+Figure5c = ggplot() + theme_bw() +
+  geom_line(data = filter(modeldata_CEKD_all, StateVar %in% SVs & dose_uM %in% doses),
+            aes(x = time, y = value, col = KD), linewidth = 1.5, linetype = "solid") +
+  geom_line(data = filter(modeldata_CE, StateVar %in% SVs & dose_uM %in% doses),
+              aes(x = time, y = value), col = "black", linewidth = 1, linetype = "solid") +
+  facet_wrap(vars(StateVar), scales = "free", nrow=1) +
+  # theme(legend.position="none") +
+  xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + 
+  labs(color = "Knock-Down", title = expression(paste("Etoposide (25 ", mu, "M): Model M-CE")))
+plot(Figure5c)
+
+doses = 200
+Figure5d = ggplot() + theme_bw() +
+  geom_line(data = filter(modeldata_CDKD_all, StateVar %in% SVs & dose_uM %in% doses),
+            aes(x = time, y = value, col = KD), linewidth = 1.5, linetype = "solid") +
+  geom_line(data = filter(modeldata_CD, StateVar %in% SVs & dose_uM %in% doses),
+              aes(x = time, y = value), col = "black", linewidth = 1, linetype = "solid") +
+  facet_wrap(vars(StateVar), scales = "free", nrow=1) +
+  # theme(legend.position="none") +
+  xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + 
+  labs(color = "Knock-Down", title = expression(paste("DEM (200 ", mu, "M): Model M-CD")))
+plot(Figure5d)
+
+if(SaveFigures == 1){
+  ggsave("Figure5c.svg", plot = Figure5c, path = "..//Figures", width = 30,
+         height = 7, units = "cm", dpi = 300)
+  ggsave("Figure5d.svg", plot = Figure5d, path = "..//Figures", width = 30,
+         height = 7, units = "cm", dpi = 300)
+}
+```
+
+### Figure S14: knock-down model all doses
+
+Plotting of the knock-down models for all concentrations etoposide and DEM.
+
+```{r}
+SVs = c("NRF2", "SRXN1","p53", "MDM2")
+
+doses = doses_ETO
+FigureS14a = ggplot() + theme_bw() +
+  geom_line(data = filter(modeldata_CEKD_all, StateVar %in% SVs & dose_uM %in% doses),
+            aes(x = time, y = value, col = KD), linewidth = 1.5, linetype = "solid") +
+  geom_line(data = filter(modeldata_CE, StateVar %in% SVs & dose_uM %in% doses),
+              aes(x = time, y = value), col = "black", linewidth = 1, linetype = "solid") +
+  facet_grid(cols = vars(dose_uM), rows = vars(StateVar), scales = "free", 
+             labeller = labeller(dose_uM = dose_names)) +
+  xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + 
+  labs(color = "Knock-Down", title = "Etoposide: Model M-CE")
+plot(FigureS14a)
+
+doses = doses_DEM
+FigureS14b = ggplot() + theme_bw() +
+  geom_line(data = filter(modeldata_CDKD_all, StateVar %in% SVs & dose_uM %in% doses),
+            aes(x = time, y = value, col = KD), linewidth = 1.5, linetype = "solid") +
+  geom_line(data = filter(modeldata_CD, StateVar %in% SVs & dose_uM %in% doses),
+              aes(x = time, y = value), col = "black", linewidth = 1, linetype = "solid") +
+  facet_grid(cols = vars(dose_uM), rows = vars(StateVar), scales = "free", 
+             labeller = labeller(dose_uM = dose_names)) +
+  xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + 
+  labs(color = "Knock-Down", title = "DEM: Model M-CD")
+plot(FigureS14b)
+
+if(SaveFigures == 1){
+  ggsave("FigureS14a.svg", plot = FigureS14a, path = "..//Figures", width = 30,
+         height = 20, units = "cm", dpi = 300)
+  ggsave("FigureS14b.svg", plot = FigureS14b, path = "..//Figures", width = 30,
+         height = 20, units = "cm", dpi = 300)
+}
+
+```
+### Figure S15: knock-down model p21
+
+Plotting of the p21 simulation of the knock-down models for all concentrations etoposide and DEM.
+
+```{r}
+SVs = c("p21")
+
+doses = doses_ETO
+FigureS15 = ggplot() + theme_bw() +
+  geom_line(data = filter(modeldata_CEKD_all, StateVar %in% SVs & dose_uM %in% doses),
+            aes(x = time, y = value, col = KD), linewidth = 1.5, linetype = "solid") +
+  geom_line(data = filter(modeldata_CE, StateVar %in% SVs & dose_uM %in% doses),
+              aes(x = time, y = value), col = "black", linewidth = 1, linetype = "solid") +
+  facet_grid(cols = vars(dose_uM), rows = vars(StateVar), scales = "free", 
+             labeller = labeller(dose_uM = dose_names)) +
+  xlab("Time (hours)") + ylab("Normalised GFP intensity (-)") + 
+  labs(color = "Knock-Down", title = "Etoposide: Model M-CD")
+plot(FigureS15)
+
+if(SaveFigures == 1){
+  ggsave("FigureS15.pdf", plot = FigureS15, path = "..//Figures", width = 30,
+         height = 8, units = "cm", dpi = 300)
+}
+```
+
+```{r}
+sessionInfo()
+```
+Session Info:
+
+R version 4.3.3 (2024-02-29 ucrt)
+Platform: x86_64-w64-mingw32/x64 (64-bit)
+Running under: Windows 11 x64 (build 22631)
+
+Matrix products: default
+
+
+locale:
+[1] LC_COLLATE=English_United Kingdom.utf8 
+[2] LC_CTYPE=English_United Kingdom.utf8   
+[3] LC_MONETARY=English_United Kingdom.utf8
+[4] LC_NUMERIC=C                           
+[5] LC_TIME=English_United Kingdom.utf8    
+
+time zone: Europe/Amsterdam
+tzcode source: internal
+
+attached base packages:
+[1] stats     graphics  grDevices utils     datasets  methods  
+[7] base     
+
+other attached packages:
+ [1] svglite_2.1.3   deSolve_1.40    lubridate_1.9.3
+ [4] forcats_1.0.0   stringr_1.5.1   dplyr_1.1.4    
+ [7] purrr_1.0.2     readr_2.1.5     tidyr_1.3.1    
+[10] tibble_3.2.1    ggplot2_3.5.0   tidyverse_2.0.0
+
+loaded via a namespace (and not attached):
+ [1] gtable_0.3.4      compiler_4.3.3    tidyselect_1.2.1 
+ [4] systemfonts_1.0.6 scales_1.3.0      R6_2.5.1         
+ [7] labeling_0.4.3    generics_0.1.3    knitr_1.45       
+[10] munsell_0.5.0     pillar_1.9.0      tzdb_0.4.0       
+[13] rlang_1.1.3       utf8_1.2.4        stringi_1.8.3    
+[16] xfun_0.42         timechange_0.3.0  cli_3.6.2        
+[19] withr_3.0.0       magrittr_2.0.3    grid_4.3.3       
+[22] rstudioapi_0.15.0 hms_1.1.3         lifecycle_1.0.4  
+[25] vctrs_0.6.5       glue_1.7.0        farver_2.1.1     
+[28] fansi_1.0.6       colorspace_2.1-0  tools_4.3.3      
+[31] pkgconfig_2.0.3  

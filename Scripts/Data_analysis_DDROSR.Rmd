@@ -1,0 +1,229 @@
+---
+title: "Data analysis DDR-OSR"
+author: "Elsje Burgers"
+last modified: "2024-11-26"
+output: html_document
+---
+
+This script can be used to obtain the data used for figures and parameter fitting.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load packages
+
+```{r}
+rm(list = ls())
+library(tidyverse)
+
+save_data = 0 #if 1 data will be saved as csv, if 0 data will not be saved
+```
+
+# Load data
+Here, we load the files and correct some minor mistakes in the files to make sure they all use the same way to indicate the cell line, reporter etc.
+```{r}
+data_GFP = do.call(rbind, lapply(list.files(path = "..//Data//all_data//GFP//", 
+                                            full.names = TRUE), read.delim))
+data_ANVPI = do.call(rbind, lapply(list.files(path = "..//Data//all_data//AnVPI//", 
+                                              full.names = TRUE), read.delim))
+
+data_GFP$cell_line[data_GFP$cell_line == "HepG2MDM2-GFP"] = "HepG2 MDM2-GFP"
+data_GFP$cell_line[data_GFP$cell_line == "HepG2p21-GFP"] = "HepG2 p21-GFP"
+data_GFP$cell_line[data_GFP$cell_line == "HepG2 NRF-2-GFP"] = "HepG2 NRF2-GFP"
+
+data_ANVPI$cell_line[data_ANVPI$cell_line == "HepG2MDM2-GFP"] = "HepG2 MDM2-GFP"
+data_ANVPI$cell_line[data_ANVPI$cell_line == "HepG2p21-GFP"] = "HepG2 p21-GFP"
+data_ANVPI$cell_line[data_ANVPI$cell_line == "HepG2 NRF-2-GFP"] = "HepG2 NRF2-GFP"
+data_ANVPI$replID[data_ANVPI$plateID == "20180329_SBT-TQ_ATF4_rep2"] = 2
+
+data_GFP = mutate(data_GFP, treatment = gsub(' ', '', treatment))
+data_ANVPI = mutate(data_ANVPI, treatment = gsub(' ', '', treatment))
+```
+
+# GFP data
+## Correct and normalise
+The data is corrected for the background GFP expression by subtracting the intensity for the exposure to 0.01 DMSO from the measured intensity.
+There is various ways of normalising the data. In the following chunk it is normalised using the minimal value per plate and the mean value per plate.
+```{r message=FALSE, warning=FALSE}
+# Data set containing the 0.01 DMSO values is defined here.
+correction = filter(data_GFP, treatment=="DMSO" & dose_uM==0.01) %>%
+  select(c(3:7,9)) %>%
+  rename(DMSO_value = GFP_int)
+
+# Now the correction is done.
+GFP_cor = data_GFP %>%
+  left_join(correction) %>%
+  mutate(GFP_corrected = ifelse(!is.na(GFP_int),
+                          GFP_int - DMSO_value,
+                          GFP_int))
+
+# Here the mean and min value to normalise with are extracted.
+plate_mean_min <- GFP_cor %>%
+  group_by(cell_line, replID) %>%
+  summarise(mean_value = mean(GFP_corrected, na.rm = TRUE),
+            min_value = min(GFP_corrected, na.rm = TRUE))
+
+# Min-mean normalization
+GFP_normalised <- GFP_cor %>%
+  left_join(plate_mean_min) %>%
+  mutate(GFP_norm = ifelse(!is.na(GFP_corrected),
+                           (GFP_corrected - min_value)/(mean_value - min_value),
+                           GFP_corrected))
+
+# Get desired dataset
+GFP_realdata = GFP_normalised %>%
+  mutate(StateVar = gsub('HepG2 ', '', cell_line )) %>%
+  mutate(StateVar = gsub('-GFP', '', StateVar )) %>%
+  select(c(1, 2, 5, 6, 7, 16, 17)) %>%
+  rename(data4modelReal = GFP_norm, timeID_orig = timeID) %>%
+  mutate(timepoints = round(timeAfterExposure))
+```
+
+## Interpolate
+We interpolate the data using a cubic normal spline.
+```{r}
+tmps = GFP_realdata %>%
+  group_by(StateVar, replID) %>%
+  summarise(last_tmps = max(timeAfterExposure), first_tmps = min(timeAfterExposure))
+max_tmp = min(tmps$last_tmps)
+
+# Now we interpolate the data
+interpolation  = GFP_realdata %>%
+  group_by(treatment, dose_uM, replID,  StateVar) %>%
+  summarise(timepoints = spline(x = timeAfterExposure, y = data4modelReal, 
+                                xout = 0:max_tmp, method = "natural")$x, 
+            data4modelInterpol = spline(x = timeAfterExposure, y = data4modelReal, 
+            xout = 0:max_tmp, method = "natural")$y) %>%
+  left_join(GFP_realdata) %>%
+  group_by(treatment, dose_uM, replID,  StateVar) %>%
+  mutate(data4modelInterpol = ifelse(timepoints < min(timeAfterExposure, na.rm = TRUE)
+                                     & is.na(timeAfterExposure),NA, data4modelInterpol))
+```
+## Filter
+We select the compound and doses of interest.
+```{r}
+compound = "ETO" #"DEM"
+max_dose  = 25 #200
+
+selected_data = interpolation %>%
+    filter(treatment == compound & dose_uM <= max_dose)
+```
+
+## Plot
+We plot the data to check if everything went as planned.
+```{r}
+# plot all timepoints
+plot = ggplot(data = selected_data) + 
+  geom_point(aes(x = timepoints, y = data4modelInterpol, color  = as.factor(replID)), shape = 1) + 
+  geom_point(aes(x = timeAfterExposure, y = data4modelReal, color  = as.factor(replID)), shape = 2) +
+  facet_grid(cols = vars(dose_uM), rows = vars(StateVar), scales = "free")
+print(plot)
+
+# plot early timepoints, most errors in extrapolation occur there.
+plot = ggplot(data = filter(selected_data, timepoints<10)) + 
+  geom_point(aes(x = timepoints, y = data4modelInterpol, color  = as.factor(replID)), shape = 1) + 
+  geom_point(aes(x = timeAfterExposure, y = data4modelReal, color  = as.factor(replID)), shape = 3) +
+  facet_grid(cols = vars(dose_uM), rows = vars(StateVar), scales = "free")
+print(plot)
+
+# for one protein
+plot = ggplot(data = filter(selected_data, timepoints<20 & StateVar == "NRF2" )) + 
+  geom_point(aes(x = timepoints, y = data4modelInterpol, 
+                 shape  = as.factor(replID)), color = "black") +
+  geom_point(aes(x = timeAfterExposure, y = data4modelReal, 
+                 shape  = as.factor(replID)), color = "red") +
+  labs(shape = "replID") + 
+  facet_wrap(vars(dose_uM))
+print(plot)
+```
+## Save
+If desired, we can save the data here in the format required for the parameter fitting.
+```{r}
+fitdata = selected_data %>%
+  mutate(timeID = timepoints+1, dose_uMadj = dose_uM) %>%
+  select("StateVar", "replID", "treatment", "timeID", "timeAfterExposure", 
+         "dose_uM", "dose_uMadj", "timepoints", "data4modelInterpol", 
+         "data4modelReal", "timeID_orig")
+
+if (save_data == 1){
+  write.csv(fitdata, file = paste("..\\Data\\GFPdata_", compound, "_", 
+                                  Sys.Date(), ".csv", sep = ""))
+}
+```
+
+# Viability data
+This data does not need to be corrected or interpolated. However, to make it easier to work with, we do want to filter and average the data. Also, we will normalise the cell count.
+## Filter
+```{r}
+data_ANVPI_filter = data_ANVPI %>%
+  filter(treatment == compound & timeID<43)
+```
+
+## Normalise
+```{r}
+count0 = data_ANVPI_filter %>%
+  filter(timeID == 1) %>%
+  rename(count_t0 = cell_count) %>%
+  select(treatment, dose_uM, replID, cell_line, count_t0)
+
+data_ANVPI_norm = data_ANVPI_filter %>%
+  left_join(count0) %>%
+  mutate(count_norm = cell_count/count_t0)
+```
+
+## Average
+```{r}
+data_ANVPI_mean = data_ANVPI_norm %>%
+  group_by(treatment, dose_uM, timeID) %>%
+  summarise(mean_time = mean(timeAfterExposure, na.rm = TRUE),
+            mean_count = mean(cell_count, na.rm = TRUE),
+            sd_count = sd(cell_count, na.rm = TRUE),
+            mean_count_norm = mean(count_norm, na.rm = TRUE),
+            sd_count_norm = sd(count_norm, na.rm = TRUE),
+            mean_PI = mean(PIPos_0.1, na.rm = TRUE),
+            sd_PI = sd(PIPos_0.1, na.rm = TRUE),
+            mean_AnV = mean(AnVPos_0.1, na.rm = TRUE),
+            sd_AnV = sd(AnVPos_0.1, na.rm = TRUE))
+```
+## Save
+If desired, we can save the data here. 
+```{r}
+if (save_data == 1){
+  write.csv(data_ANVPI_mean, file = paste("..\\Data\\ViabilityData_", compound, 
+                                          "_", Sys.Date(), ".csv", sep = ""))
+}
+```
+
+```{r}
+sessionInfo()
+```
+R version 4.3.3 (2024-02-29 ucrt)
+Platform: x86_64-w64-mingw32/x64 (64-bit)
+Running under: Windows 11 x64 (build 22631)
+
+Matrix products: default
+
+
+locale:
+[1] LC_COLLATE=English_United Kingdom.utf8  LC_CTYPE=English_United Kingdom.utf8   
+[3] LC_MONETARY=English_United Kingdom.utf8 LC_NUMERIC=C                           
+[5] LC_TIME=English_United Kingdom.utf8    
+
+time zone: Europe/Amsterdam
+tzcode source: internal
+
+attached base packages:
+[1] stats     graphics  grDevices utils     datasets  methods   base     
+
+other attached packages:
+ [1] lubridate_1.9.3 forcats_1.0.0   stringr_1.5.1   dplyr_1.1.4     purrr_1.0.2     readr_2.1.5    
+ [7] tidyr_1.3.1     tibble_3.2.1    ggplot2_3.5.1   tidyverse_2.0.0
+
+loaded via a namespace (and not attached):
+ [1] crayon_1.5.3      vctrs_0.6.5       cli_3.6.3         knitr_1.49        rlang_1.1.4       xfun_0.49        
+ [7] stringi_1.8.4     generics_0.1.3    labeling_0.4.3    glue_1.8.0        colorspace_2.1-1  hms_1.1.3        
+[13] scales_1.3.0      fansi_1.0.6       grid_4.3.3        munsell_0.5.1     evaluate_1.0.1    tzdb_0.4.0       
+[19] lifecycle_1.0.4   compiler_4.3.3    timechange_0.3.0  pkgconfig_2.0.3   rstudioapi_0.17.1 farver_2.1.2     
+[25] R6_2.5.1          tidyselect_1.2.1  utf8_1.2.4        pillar_1.9.0      magrittr_2.0.3    tools_4.3.3      
+[31] withr_3.0.2       gtable_0.3.6

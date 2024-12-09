@@ -1,0 +1,372 @@
+# This file contains a the input for the ParameterOptimization.py fitting script. 
+# This file contains a system of ODEs, the steady states constraints, the information on the observables, 
+# the parameters and user settings for the fitting script. 
+#
+# The three sections for settings, parameters and ODEs are separated by "####START_XXX####" and "####END_XXX####". 
+# These separations are read by the fitting script and should therefore not be deleted!
+#
+# The format is as follows:
+#
+# Section 1: User settings. 
+# This section contains information on the parameter fitting settings, such as number of parameter sets and cores to use, 
+# but also the names of the columns that are used to read in the data.
+#
+# Section 2: Parameters.
+# 
+# Section 3: ODEs and observable functions.
+#
+#### Example file for equations:
+####
+#### # ODE equations
+#### f0 = s + kmin * V - kplus * U - du * U
+#### f1 = kplus * U - kmin * V - dv * V
+####
+#### # Steady state constraints
+#### fR1 = ((s + (kmin * Vo)) / Uo ) - kplus # solved for du
+#### fR2 = ((kplus * Uo) / Vo) - kmin # solved for dv
+####
+#### # Equations for the observables
+#### g0 = sp_U * U + op_U
+#### g1 = sp_V * V + op_V
+
+####START_USER_SETTINGS####
+
+# Write some information for the README file, for example a description of the model.
+# Example: < OPTIONAL_TEXT = "This is a test run for model M1." >
+#
+OPTIONAL_TEXT = "Test run for GSH with mean data, method MSE."
+
+# Set the number of initial parameter sets.
+# Example: < NiniP = 20 >
+#
+NiniP = 100
+
+# Set the number of CPU's to use simultaneously.
+# Example: < Ncpu = 20 >
+#
+Ncpu = 10
+
+# Maximum calculation time (in seconds) before breaking off the estimation.
+# Recommended to limit it to 24 of 48 hours.
+# Example: < timeMax = 24 * 60 * 60 >
+#
+timeMax = 24 * 60 * 60
+
+# Number of time points that should be simulated and are also included in the data
+# Example: < nrOfTps = 72 >
+#
+nrOfTps = 63
+
+TimeSpan = np.linspace(0,62,63)
+
+# Name of the column in the data set that contains the experimental data as string.
+# Example: < realDataColName = "expression" >
+#
+realDataColName = "data4modelReal"
+
+# Name of the column in the data set that contains the real time points belonging to the experimental data as string. 
+# Example: < realTimeColName = "time" >
+#
+realTimeColName = "timeAfterExposure" 
+
+# Name of the column that contains the interpolated data as string. If the data set contains only the experimental data, this
+# should be the same column name as the realDataColName.
+# Example: < interpolDataColName = "expression" >
+#
+interpolDataColName = "data4modelInterpol"
+
+# Name of the column in the data set that contains the time points belonging to the interpolated data as string. 
+# If the data set contains only the experimental data, this
+# should be the same column name as the realTimeColName.
+# Example: < interpolTimeColName = "time" >
+#
+interpolTimeColName = "timepoints"
+
+# Name of the column in the data set that contains the information on the names of the state variables as string.
+# Example: < stateVarName = "variable" >
+#
+stateVarName = "StateVar"
+
+# Name of the column in the data set that contains the information on the concentration as string.
+# Should remain empty, i.e. doseColName = None, if there is no dose, but cannot be omitted entirely.
+# Example: < doseColName = "concentration" >
+#
+doseColName = "dose_uMadj"
+
+# Name of the column that contains the information on the names of the replicate or plate IDs as string.
+# Should remain empty, i.e. plateIDName = None, if there is are no replicates, but cannot be omitted entirely.
+# Example: < plateIDName = "replicate" >
+#
+plateIDName = "replID"
+
+# Additional and manually specified data information to select only certain
+# doses, state variables or replicates.
+# Give the names of the replicates/plateIDs per state variable in the data. The replicates/plateIDs of every 
+# state variable are contained in a list and all these lists are elements of a bigger list.
+# If no replicates, use [] or None. The plateIDName should then also be empty.
+# If not defined, then these lists are determined from the data automatically.
+# Example: < plateID_list = [[1, 2, 3], [1, 2, 3],[1, 2, 3]] >
+#
+plateID_list = [[1,2,3], [1,2,3]]  
+
+# List of doses that need to be fitted to and as denoted in the concentration column in the dataset.
+# This should be a numerical list!
+# If no doses, use [] or None. The doseColName should then also be empty.
+# If not defined, then these lists are determined from the data automatically.
+# Example: < doseList = [0,10,100] >
+#
+doseList = [2, 10, 20, 40, 80, 120, 160, 200]
+
+# Type of dose function (choose from: stepwise, expDecay) if the stress input is an explicit, numerical function
+# So far, only the expDecay option is tested.
+# Example: < doseFunctionType = "expDecay" >
+#
+doseFunctionType = "expDecay"
+
+# SD handling: if the sd is 0 for one or multiple timepoints, how should this be treated?
+# In case there is no data at a timepoint, the sd is NaN and the values in the Jacobian and cost funtion become zero.
+# The SD can become zero for multiple reasons:
+# Only one replicate exists for one/few timepoints of that variable
+# Only one replicate exists for all timepoints of that variable
+# Replicates are equal (very unlikely)
+# Replicates are equal due to normalisation
+# Something else...
+# Cosequently, this determines the way you want to handle the SD, for example: 
+# Very small SD ("Small_Sd")
+# Very large SD ("Large_Sd")
+# SD nan ("Nan_Sd")
+# SD equal to average SD for that variable ("Average_Sd")
+# SD equal to other chosen value ("Input_Sd", sdvalue must be equal to chosen value)
+# Something else...
+
+sdzero = "Average_Sd"
+
+sdsmall = 1E-10
+sdlarge = 1E10
+sdvalue = 1
+
+####END_USER_SETTINGS####
+
+####START_PARAMETERS####
+#If OSR-stress p=0, if DDR-stress p=1
+p = 0
+
+# set setady states
+modifiedK1_ss = 0
+NRF2_ss = 0.77378141
+SRXN1_ss = 0.433384695
+MDM2_ss = 0.9496844
+P21_ss = 0.659682552
+BTG2_ss = 0.455598913
+
+#parameters from OSR model, 20230120_165553, fit 42
+KEAP1_ss = 8.382598e+01
+EC1 = 7.973741e-03
+EC2 = 4.851095e-02
+EC3 = 1.030261e-01
+EC4 = 2.555489e-01
+EC5 = 8.255735e-01
+EC6 = 1.770715e+00
+EC7 = 2.900508e+00
+EC8 = 6.452683e+00
+tau1 = 1.875880e-02
+buildK1 = 3.682009e-12
+k_K1_modification = 2.983806e+01
+k_K1_unmodification = 7.244835e-01
+buildN2 = 3.646739e-01
+VmaxN2_deg = 2.626465e-03
+KmN2_deg = 1.554999e-13
+buildS1 = 7.479035e-16
+Vmax_S1 = 6.661687e-01
+Km_S1 = 1.093301e+00
+Vmax_K1 = 9.890718e+02
+Km_K1 = 1.434512e+00
+hillS1 = 1.000000e+01
+hillK1 = 1.000000e+01
+
+# parameters from DDR model, 20230126_172038, fit 94
+DD_ss = 8.571625e+00
+P53_ss = 1.807649e-04
+P_53P_ss = 9.678364e-01
+buildD = 8.220875e-02
+buildP5 = 9.999949e+02
+dephos = 7.281894e-01
+phos = 9.999969e+02
+#degradP5_byM2 = 3.218589e-07
+#degradP5p_byM2 = 4.641296e+00
+buildM2 = 4.891359e-02
+VmaxM2_byP5p = 2.876450e-01
+KmM2_byP5p = 1.359464e+00
+buildP2 = 5.836528e-02
+VmaxP2 = 8.090364e-01
+KmP2 = 2.915716e+00
+buildB2 = 2.420018e-02
+VmaxB2 = 1.061170e+00
+KmB2 = 2.808959e+00
+n = 4
+
+# Fixed/known parameters or initial states (optional)
+# Example: < A_init = 0.1 
+#            conc1 = 0 >
+#
+
+# Name of stress as it occurs in the ODE functions; either stressName = ['your stress input name'], i.e. your stress name as list, 
+# or set as empty list, i.e. stressName = [], if there is no model perturbation.
+# Example: < stressName = ["S"] >
+#
+stressName = ['S'] 
+
+# Names of the state variables in the order of the ODEs (as defined below). 
+# If one of the state variable is the stress input, then use the same name for the state variable as the stress in <stressName> 
+# and define the names for the stress level(s) in <doseNames>.
+# Example: < stateList = ['A','B','C']  >
+#
+stateList = ['DD', 'P53', 'P_53P', 'MDM2', 'P21', 'BTG2', 'KEAP1', 'modifiedK1', 'NRF2', 'SRXN1']
+
+# Names of the free initial/steady state parameters, in the order of the ODE equations that they belong to (as defined below). 
+# Example: < stateOList = ['B_init','C_init'] >
+#
+stateOList = [ ] 
+
+# Initial states of known state variables, in the order of the ODE equations that they belong to (as defined below). 
+# Example: < stateOKnownList = [A_init] >
+#
+stateOKnownList = [DD_ss, P53_ss, P_53P_ss, MDM2_ss, P21_ss, BTG2_ss, KEAP1_ss, modifiedK1_ss, NRF2_ss, SRXN1_ss]
+
+# Names of the initial states of known state variables, in the order of <stateOKnownList>. 
+# Example: < stateOKnownNameList = ['A_init'] >
+#
+stateOKnownNameList = ['DD_ss', 'P53_ss', 'P_53P_ss', 'MDM2_ss', 'P21_ss', 'BTG2_ss', 'KEAP1_ss', 'modifiedK1_ss', 'NRF2_ss', 'SRXN1_ss']
+
+# All initial states in the same order as <stateList>. 
+# Example: < allIniStatesList = ['A_init','B_init','C_init'] >
+#
+allIniStatesList = ['DD_ss', 'P53_ss', 'P_53P_ss', 'MDM2_ss', 'P21_ss', 'BTG2_ss', 'KEAP1_ss', 'modifiedK1_ss', 'NRF2_ss', 'SRXN1_ss']
+
+# Name of the functions containing the observables. This should correspond to the function names as
+# defined in the section with the ODEs below. Use a "g" and then an index number starting at 0.
+# Example: < obsList = ["g0","g1","g2"] >
+#
+obsList = ['g0', 'g1']
+
+# Names of the observed state variables, as denoted in the data set in column <stateVarName>.
+# Example: < obsStateVarList = ['A','B','C'] >
+#
+obsStateVarList = ['MDM2', 'p53'] 
+
+# Star parameters, i.e. the parameters that can be described as functions of snow parameters 
+# (the union set of the initial or steady states and the free parameters). 
+# For every star parameter, there should be a constraint function fR1, ..., fRn defined in the ODE section below.
+# The list should be in the same order as the steady state constraint functions fR1, ..., fRn. These functions are defined
+# at the bottom of this file in the ODE section.
+# Important - Parameter names should not include names of the state variables (case sensitive)!
+# Example: < paraStarList = ["ksa", "ksb", "kdc"] > for which ksa should then be defined by fR1, ksb by fR2, and kdc by f3R.
+#
+paraStarList = ['degradD_byP5', 'degradP5', 'degradP5p', 'degradM2', 'degradP2', 'degradB2', 'degradK1', 'degradN2', 'degradS1'] 
+
+# Scaling and offset parameters
+# Example: < paraSO = ["sf_a","o_a"] >
+#
+paraSO = []
+
+# Snow parameters, i.e. the free parameters except for the initial or steady state variables. The order doesn't matter here.
+# Important - Parameter names should not include names of the state variables (case sensitive)!
+# Example: < paraSnowList = ["kda", "kdb", "ksc"] >
+#
+paraSnowList = ['KiP5_sc', 'VmaxM2_byN2', 'hillM2_byN2', 'KmM2_byN2', 'degradP5_byM2', 'degradP5p_byM2', 'sc_S', 'Km_S', 'hillP5_byM2', 'KmP5_byM2', 'hillP5p_byM2', 'KmP5p_byM2'] + paraSO
+
+# Dose parameters that need to be estimated
+# Example: < doseParmsList = ["conc2", "conc3"] >
+#
+doseParmsList = [] 
+
+# Names of all dose parameters
+# Example: < doseNames = ["conc1", "conc2", "conc3"] >
+#
+doseNames = ["EC1", "EC2", "EC3", "EC4", "EC5", "EC6", "EC7", "EC8"]
+
+# Pharmacokinetic parameters. If the stress input is a numerical function with <doseFunctionType = "expDecay">, this should be "tau1"
+# Example: < PKparms = ["tau1"] >
+#
+PKparms = []
+
+# Optional: upper and lower bounds in the order of:
+# state variables for estimation (Nse), 
+# dose parameters (Nd), 
+# pharmacokinetic parameters (Npk) and 
+# snow parameters for estimation (Nsnow)
+# For each parameter, you can indicate the lower bound (lbound) or upper bound (ubound).
+# Indicate the index position (for Python, i.e. start counting at 0) of the parameter 
+# and the corresponding bound on log scale as list: [index,np.log(bound)]. 
+# If not applicable, this can be omitted completely.
+# Example: < lbounds = [[4,-np.inf]]
+#            ubounds = [[4,np.log(1)]] >
+#
+lbounds = [[2, np.log(1)], [8, np.log(1)], [10, np.log(1)]]
+ubounds = [[2, np.log(10)], [8, np.log(10)], [10, np.log(10)]]
+
+# Optional: priors, i.e. starting position for a parameter before calibration in the order of:
+# state variables for estimation (Nse), 
+# dose parameters (Nd), 
+# pharmacokinetic parameters (Npk) and 
+# snow parameters for estimation (Nsnow)
+# Indicate the index position (for Python, i.e. start counting at 0) of the parameter 
+# and the corresponding prior on linear scale as list: [index,prior]. 
+# MUST be specified for parameters for which lower and upper bounds are specified above
+# and where the interval [lbound, ubound] does not fully contain the [0,1] interval.
+# If not applicable, this can be omitted completely.
+# Example: < priors = [[0,1],[4,0]] >
+priors = [[2, 2], [8,2], [10,2]] 
+
+####END_PARAMETERS####
+
+####START_ODES####
+
+# Set of ODE equations. 
+# Every ODE should be numbered with "f" and an index number starting at 0.
+# Example: < f0 = ksa - kda * A
+#            f1 = ksb - kdb * B
+#            f2 = ksc * A * B - kdc * C >
+#
+#DDR model
+f0 = buildD + sc_S*S/(Km_S + S) - degradD_byP5 * DD * P_53P
+f1 = buildP5 + dephos * P_53P - phos * P53 * DD - degradP5 * ((1/(1 + KiP5_sc*SRXN1)) + ((degradP5_byM2 * (MDM2**hillP5_byM2))/((KmP5_byM2**hillP5_byM2) + (MDM2**hillP5_byM2)))) * P53
+f2 = phos * P53 * DD - dephos * P_53P - degradP5p * (1 + ((degradP5p_byM2 * (MDM2**hillP5p_byM2))/((KmP5p_byM2**hillP5p_byM2) + (MDM2**hillP5p_byM2)))) * P_53P
+f3 = buildM2 + (VmaxM2_byP5p * P_53P**n) / (KmM2_byP5p**n + P_53P**n) + ((VmaxM2_byN2 * (NRF2**hillM2_byN2))/(KmM2_byN2**hillM2_byN2 + NRF2**hillM2_byN2)) - degradM2 * MDM2
+f4 = buildP2 + (VmaxP2 * P_53P**n) / (KmP2**n + P_53P**n) - degradP2 * P21
+f5 = buildB2 + (VmaxB2 * P_53P**n) / (KmB2**n + P_53P**n) - degradB2 * BTG2
+# OSR model
+f6 = buildK1 + ((Vmax_K1*(NRF2**hillK1))/(Km_K1**hillK1 + NRF2**hillK1)) - (k_K1_modification*(S)*(1-p)*KEAP1 - k_K1_unmodification*modifiedK1) - degradK1* KEAP1
+f7 = (k_K1_modification*(S)*(1-p)*KEAP1 - k_K1_unmodification*modifiedK1) - degradK1* modifiedK1
+f8 = buildN2  - ((VmaxN2_deg*KEAP1*(NRF2))/((KmN2_deg) + (NRF2))) - degradN2 * NRF2
+f9 = buildS1 + ((Vmax_S1 * (NRF2**hillS1))/(Km_S1**hillS1 + NRF2**hillS1)) - degradS1 * SRXN1
+
+# Steady state constraints
+# Every constraint should be numbered with "fR" and an index number starting at 1.
+# Example: < fR1 = kda * A
+#            fR2 = kdb * B 
+#            fR3 = ksc * A_init * B_init / C_init >
+#
+
+#DDR model
+fR1 = buildD/(DD_ss * P_53P_ss)
+fR2 = (buildP5 + dephos * P_53P_ss - phos * P53_ss * DD_ss) / (((1/(1 + KiP5_sc*SRXN1_ss)) + ((degradP5_byM2 * (MDM2_ss**hillP5_byM2))/((KmP5_byM2**hillP5_byM2) + (MDM2_ss**hillP5_byM2)))) * P53_ss)
+fR3 = (phos * P53_ss * DD_ss - dephos * P_53P_ss) / ((1 + ((degradP5p_byM2 * (MDM2_ss**hillP5p_byM2))/((KmP5p_byM2**hillP5p_byM2) + (MDM2_ss**hillP5p_byM2)))) * P_53P_ss)
+fR4 = (buildM2 + (VmaxM2_byP5p * P_53P_ss**n) / (KmM2_byP5p**n + P_53P_ss**n) + ((VmaxM2_byN2 * (NRF2_ss**hillM2_byN2))/(KmM2_byN2**hillM2_byN2 + NRF2_ss**hillM2_byN2)) ) / MDM2_ss
+fR5 = (buildP2 + (VmaxP2 * P_53P_ss**n) / (KmP2**n + P_53P_ss**n)) / P21_ss
+fR6 = (buildB2 + (VmaxB2 * P_53P_ss**n) / (KmB2**n + P_53P_ss**n))/ BTG2_ss
+# OSR model
+fR7 = (buildK1 + ((Vmax_K1*(NRF2_ss**hillK1))/(Km_K1**hillK1 + NRF2_ss**hillK1)))/KEAP1_ss
+fR8 = (buildN2 - (VmaxN2_deg*KEAP1_ss*NRF2_ss)/(((KmN2_deg) + NRF2_ss))) / NRF2_ss
+fR9 = (buildS1 + ((Vmax_S1 * (NRF2_ss**hillS1))/(Km_S1**hillS1 + NRF2_ss**hillS1))) / SRXN1_ss
+
+# Equations for the observables, that can contain the scaling and offset functions
+# Every equation should be numbered with "g" and an index number starting at 0.
+# Example: < g0 = sf_a * A + o_a 
+#            g1 = B
+#            g2 = C >
+#
+
+g0 = MDM2
+g1 = P53 + P_53P
+####END_ODES####
